@@ -105,7 +105,8 @@ const INTL_OPERATORS = {
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-const rand = (n) => crypto.randomInt(10 ** (n - 1), 10 ** n).toString();
+const rand = (n) =>
+  String(crypto.randomInt(1, 10)) + Array.from({ length: n - 1 }, () => crypto.randomInt(0, 10)).join('');
 
 function outcomeFor(recipient) {
   const r = String(recipient || '');

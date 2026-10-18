@@ -196,13 +196,15 @@ describe('settings, provider, commission, limits', () => {
   test('commission rates change what customers earn', async () => {
     const { superAdmin, customer } = await setup();
     const a = auth(superAdmin.token);
+    const airOf = async () =>
+      (await api().get('/api/admin/commission?period=today').set(a)).body.data.services.find((x) => x.service === 'airtime');
+    const base = await airOf();
     await api().patch('/api/admin/commission/rates/airtime').set(a).send({ user: 5, platform: 1 });
     const p = await api().post('/api/services/airtime').set(auth(customer.token)).send({ network: 'mtn', phone: '08037777777', amount: 1000, pin: customer.pin });
     expect(p.body.data.transaction.commission).toBe(50);
-    const summary = await api().get('/api/admin/commission?period=today').set(a);
-    const air = summary.body.data.services.find((x) => x.service === 'airtime');
-    expect(air.transactions).toBe(1);
-    expect(air.revenue).toBe(10);
+    const air = await airOf();
+    expect(air.transactions - base.transactions).toBe(1);
+    expect(Math.round((air.revenue - base.revenue) * 100) / 100).toBe(10);
   });
 
   test('default and per-user limits', async () => {
