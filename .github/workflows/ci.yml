@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Run tests
+        env:
+          MONGO_URL: mongodb://localhost:27017/dalabapay_test
+        run: |
+          set +e
+          npx jest --runInBand --json --outputFile=jest.json > jest.log 2>&1
+          code=$?
+          tail -n 80 jest.log
+          node -e '
+            const r = require("./jest.json");
+            console.log(`::notice::passed=${r.numPassedTests} failed=${r.numFailedTests} suitesFailed=${r.numFailedTestSuites}`);
+            let n = 0;
+            for (const s of r.testResults) {
+              if (s.status === "failed" && !s.assertionResults.some(a => a.status === "failed")) {
+                const msg = (s.message || "suite failed").replace(/\u001b\[[0-9;]*m/g, "").slice(0, 900).replace(/\n/g, "%0A");
+                console.log(`::error file=${s.name.replace(process.cwd() + "/", "")}::${msg}`);
+              }
+              for (const a of s.assertionResults) {
+                if (a.status !== "failed" || n >= 40) continue;
+                n++;
+                const msg = (a.failureMessages.join("\n") || "").replace(/\u001b\[[0-9;]*m/g, "").slice(0, 900).replace(/\n/g, "%0A");
+                console.log(`::error file=${s.name.replace(process.cwd() + "/", "")},title=${a.fullName.slice(0, 120)}::${msg}`);
+              }
+            }
+          ' || true
+          exit $code
