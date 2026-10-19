@@ -87,6 +87,32 @@ Also `GET /status` (which services are on, maintenance), `GET /rates`, `GET /lim
 - Roles (super): `GET /roles`, `POST /roles {userId|email, role}`
 - Settings: `GET|PATCH /settings`, `GET /provider`, `POST /provider/health`, `POST /provider/test`, `GET /commission`, `PATCH /commission/rates/:service`, `GET /limits`, `PUT /limits/defaults`, `GET|PUT /limits/users/:id`
 
-## Adding a real provider
+## VTpass (live bill payments)
 
-Bill providers live in `src/providers/bill/`, payment providers in `src/providers/payment/`. Copy `simulator.js`, implement the same methods against the provider's API, register it in `index.js`, and set `BILL_PROVIDER` / `PAYMENT_PROVIDER`.
+TV subscriptions (DStv, GOtv, StarTimes) are connected to VTpass. Set in `.env`:
+
+```
+VTPASS_ENV=sandbox            # then live once VTpass enables your account
+VTPASS_SERVICES=cable         # services sent to VTpass; others use BILL_PROVIDER
+VTPASS_API_KEY=...            # vtpass.com → Profile → API Keys
+VTPASS_PUBLIC_KEY=PK_...
+VTPASS_SECRET_KEY=SK_...
+```
+
+- If a service is routed to VTpass but the keys are missing, the app says
+  "not connected" — it never falls back to the simulator.
+- References double as VTpass `request_id` (Lagos `YYYYMMDDHHmm` + random).
+- A timeout or "processing" answer leaves the payment **pending** (no refund
+  yet). The server re-checks pending payments every 3 minutes, settles or
+  refunds them, and raises an admin alert if one is still pending after 30
+  minutes. Admins can also press "Check with provider".
+- Low VTpass wallet balance and rejected keys raise critical admin alerts.
+- Renewal is offered only when VTpass returns a renewal amount; StarTimes is
+  always "choose a package", one period at a time.
+
+Sandbox smartcard `1212121212` succeeds; `201000000000` stays pending;
+`300000000000` times out; any other number fails.
+
+## Adding another provider
+
+Bill providers live in `src/providers/bill/`, payment providers in `src/providers/payment/`. Implement the same functions as `simulator.js` and register it in `index.js`.
