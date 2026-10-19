@@ -40,7 +40,7 @@ const DEFAULTS = {
     airtime: 50 * NAIRA,
     data: 50 * NAIRA,
     electricity: 2_000 * NAIRA,
-    cable: 500 * NAIRA,
+    cable: 50 * NAIRA, // TV plans have fixed prices; StarTimes daily is ₦90
     education: 500 * NAIRA,
     insurance: 500 * NAIRA,
     international: 100 * NAIRA,
