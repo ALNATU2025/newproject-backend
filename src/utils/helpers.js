@@ -8,6 +8,20 @@ function ok(res, data, status = 200) {
   return res.status(status).json({ success: true, data });
 }
 
+/**
+ * Bill-payment reference in the format VTpass requires for request_id:
+ * the first 12 characters are the Lagos date and time (YYYYMMDDHHmm), then
+ * random letters/digits. Example: 202610191356DPA1B2C3D4
+ */
+function makeRequestId() {
+  const d = new Date(Date.now() + 60 * 60 * 1000); // Africa/Lagos = UTC+1, no DST
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(
+    d.getUTCHours(),
+  )}${pad(d.getUTCMinutes())}`;
+  return `${stamp}DP${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+}
+
 /** Unique, sortable transaction reference: DP + yyyymmddhhmm + 8 random. */
 function makeReference(prefix = 'DP') {
   const d = new Date();
@@ -84,6 +98,7 @@ function maskTail(v, keep = 4) {
 }
 
 module.exports = {
+  makeRequestId,
   asyncHandler,
   ok,
   makeReference,

@@ -3,8 +3,8 @@
 //   success (commission, notify) | pending | failed (automatic refund).
 const { Transaction } = require('../models');
 const { SERVICE_LABELS } = require('../models/constants');
-const { AppError, conflict } = require('../utils/errors');
-const { makeReference } = require('../utils/helpers');
+const { AppError, conflict, unavailable } = require('../utils/errors');
+const { makeRequestId } = require('../utils/helpers');
 const { billProvider } = require('../providers/bill');
 const wallet = require('./wallet');
 const { verifyPin } = require('./pin');
@@ -22,9 +22,12 @@ async function preflight(user, service, amount) {
   const settings = await getSettings();
   assertServiceOpen(service, settings);
   assertCanTransact(user, settings);
-  if (!billProvider().isConfigured()) {
-    // Calls the provider stub so the user gets its clear message.
-    billProvider().purchase();
+  const bp = billProvider();
+  if (!bp.isConfigured(service)) {
+    throw unavailable(
+      `${SERVICE_LABELS[service] || 'This service'} is not connected yet. Please try again later.`,
+      'PROVIDER_NOT_CONFIGURED',
+    );
   }
   await assertWithinLimits(user, service, amount, settings);
   return settings;
@@ -67,7 +70,8 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
     );
   }
 
-  const reference = makeReference();
+  // Also the provider's request_id (VTpass needs a date-prefixed format).
+  const reference = makeRequestId();
   const { before, after } = await wallet.debit(user._id, amount);
 
   let txn;
@@ -82,7 +86,7 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
       service,
       recipient,
       description,
-      provider: billProvider().name,
+      provider: billProvider().nameFor ? billProvider().nameFor(service) : billProvider().name,
       balanceBefore: before,
       balanceAfter: after,
       metadata,

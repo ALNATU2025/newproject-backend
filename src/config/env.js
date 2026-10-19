@@ -38,6 +38,20 @@ const env = {
 
   billProvider: (process.env.BILL_PROVIDER || (isProd ? 'none' : 'simulator')).toLowerCase(),
   paymentProvider: (process.env.PAYMENT_PROVIDER || (isProd ? 'none' : 'simulator')).toLowerCase(),
+  // VTpass (https://vtpass.com/documentation). Keys come from your VTpass
+  // profile → API Keys. VTPASS_SERVICES lists the services sent to VTpass;
+  // the rest use BILL_PROVIDER.
+  vtpass: {
+    apiKey: process.env.VTPASS_API_KEY || '',
+    publicKey: process.env.VTPASS_PUBLIC_KEY || '',
+    secretKey: process.env.VTPASS_SECRET_KEY || '',
+    environment: (process.env.VTPASS_ENV || 'sandbox').toLowerCase() === 'live' ? 'live' : 'sandbox',
+    services: (process.env.VTPASS_SERVICES || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+    timeoutMs: Number(process.env.VTPASS_TIMEOUT_MS || 45000),
+  },
   webhookSecret: process.env.WEBHOOK_SECRET || (isProd ? '' : 'dev-webhook-secret'),
 };
 

@@ -208,7 +208,14 @@ router.post(
   validate({ body: z.object({ provider: z.string().min(2), smartcardNumber: smartcard }) }),
   asyncHandler(async (req, res) => {
     const r = await p().verifySmartcard(req.body.provider, req.body.smartcardNumber);
-    ok(res, { ...r, renewalAmount: toNaira(r.renewalAmount) });
+    const canRenew = r.canRenew !== undefined ? r.canRenew : Boolean(r.renewalAmount);
+    ok(res, {
+      ...r,
+      canRenew,
+      maxMonths: r.maxMonths || 12,
+      renewalAmount: r.renewalAmount ? toNaira(r.renewalAmount) : null,
+      balance: r.balance !== undefined && r.balance !== null ? toNaira(r.balance) : null,
+    });
   }),
 );
 
@@ -231,9 +238,24 @@ router.post(
     const prov = providers.find((x) => x.id === provider);
     if (!prov) throw badRequest('Choose a valid TV provider.', 'INVALID_PROVIDER');
     const customer = await p().verifySmartcard(provider, smartcardNumber);
+    const maxMonths = customer.maxMonths || 12;
+    if (months > maxMonths) {
+      throw badRequest(
+        maxMonths === 1 ? `${prov.name} can only be paid one period at a time.` : `You can pay up to ${maxMonths} months at once.`,
+        'TOO_MANY_MONTHS',
+      );
+    }
     let chosen;
     if (action === 'renew') {
-      chosen = { code: customer.currentPlanCode, name: customer.currentPlan, amount: customer.renewalAmount };
+      const canRenew = customer.canRenew !== undefined ? customer.canRenew : Boolean(customer.renewalAmount);
+      if (!canRenew || !customer.renewalAmount) {
+        throw badRequest('Renewal isn\'t available for this decoder. Please choose a package.', 'RENEW_NOT_AVAILABLE');
+      }
+      chosen = {
+        code: customer.currentPlanCode || 'renew',
+        name: customer.currentPlan || 'Current package',
+        amount: customer.renewalAmount,
+      };
     } else {
       if (!req.body.planCode) throw badRequest('Choose a package.', 'PLAN_REQUIRED');
       chosen = await findPlan(await p().cablePlans(provider), req.body.planCode, 'package');

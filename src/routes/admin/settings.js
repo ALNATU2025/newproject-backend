@@ -105,6 +105,8 @@ router.get(
     }
     ok(res, {
       bill: { name: bp.name, environment: bp.environment, configured: bp.isConfigured() },
+      // Which provider handles each service, e.g. cable → vtpass (live).
+      services: bp.serviceMap ? bp.serviceMap() : {},
       payment: { name: paymentProvider().name, configured: paymentProvider().isConfigured() },
       balance: nairaOrNull(balance),
       lowBalance: balance !== null && s.lowBalanceAlerts && balance < s.lowBalanceThreshold,

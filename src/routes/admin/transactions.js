@@ -6,12 +6,12 @@ const { requirePermission } = require('../../middleware/auth');
 const { validate, z, fields } = require('../../middleware/validate');
 const { asyncHandler, ok, pageParams, escapeRegex } = require('../../utils/helpers');
 const { toKobo, toNaira } = require('../../utils/money');
-const { notFound, badRequest } = require('../../utils/errors');
+const { notFound, badRequest, unavailable } = require('../../utils/errors');
+const { requeryTransaction } = require('../../services/requery');
 const { refundTransaction } = require('../../services/ledger');
 const { creditDeposit } = require('../../services/funding');
 const { payPurchaseCommission } = require('../../services/commission');
 const { getSettings } = require('../../services/settings');
-const { billProvider } = require('../../providers/bill');
 const { audit, raiseAlert } = require('../../services/alerts');
 const { notify } = require('../../services/notify');
 const { fmt } = require('../../services/limits');
@@ -276,19 +276,15 @@ router.post(
     if (t.status !== 'pending' || !BILL_SERVICES.includes(t.type)) {
       throw badRequest('Only pending bill payments can be checked with the provider.');
     }
-    const r = await billProvider().requery(t.reference);
-    if (r.status === 'success') {
-      t.status = 'success';
-      t.providerReference = r.providerReference || t.providerReference;
-      await t.save();
-      await payPurchaseCommission(t, await getSettings());
-      await notify(t.user, { title: 'Payment successful', body: `${t.description} · ${fmt(t.amount)} was successful.`, kind: 'payment' });
-    } else if (r.status === 'failed') {
-      await refundTransaction(t, { reason: r.message || 'Failed at provider', actor: req.user._id, status: 'failed' });
+    let r;
+    try {
+      r = await requeryTransaction(t, { actor: req.user._id });
+    } catch (e) {
+      throw unavailable(`Couldn't reach the provider: ${e.message}`, 'PROVIDER_UNAVAILABLE');
     }
-    await audit(req.user._id, 'transaction.requery', { transaction: t._id, targetUser: t.user, details: { result: r.status } });
+    await audit(req.user._id, 'transaction.requery', { transaction: t._id, targetUser: t.user, details: { result: r.result } });
     const fresh = await Transaction.findById(t._id).populate(POPULATE);
-    ok(res, { result: r.status, message: r.message || null, transaction: serialize.transaction(fresh, { admin: true }) });
+    ok(res, { result: r.result, message: r.message || null, transaction: serialize.transaction(fresh, { admin: true }) });
   }),
 );
 

@@ -1,15 +1,18 @@
 const env = require('./config/env');
 const { connectDb } = require('./config/db');
 const { createApp } = require('./app');
+const { billProvider } = require('./providers/bill');
+const { startPendingSweeper } = require('./services/pendingSweeper');
 
 async function main() {
   await connectDb();
   const app = createApp();
   const server = app.listen(env.port, () => {
     console.log(
-      `Dalabapay API on :${env.port} (${env.nodeEnv}) · bills=${env.billProvider} · payments=${env.paymentProvider}`,
+      `Dalabapay API on :${env.port} (${env.nodeEnv}) · bills=${billProvider().environment} · payments=${env.paymentProvider}`,
     );
   });
+  startPendingSweeper();
   const shutdown = (signal) => {
     console.log(`${signal} received, shutting down…`);
     server.close(() => process.exit(0));
