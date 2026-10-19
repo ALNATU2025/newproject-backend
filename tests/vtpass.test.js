@@ -51,6 +51,36 @@ function fakeVtpass() {
       return json(200, { response_description: '000', content: { serviceID: id, variations: VARIATIONS[id] || [] } });
     }
     if (path === 'balance') return json(200, { code: 1, contents: { balance: 186450.75 } });
+    if (path === 'get-international-airtime-countries') {
+      return json(200, {
+        response_description: '000',
+        content: {
+          countries: [
+            { code: 'GH', flag: 'https://sandbox.vtpass.com/resources/images/flags/GH.png', name: 'Ghana', currency: 'GHS', prefix: '233' },
+            { code: 'CM', flag: 'https://sandbox.vtpass.com/resources/images/flags/CM.png', name: 'Cameroon', currency: 'XAF', prefix: '237' },
+          ],
+        },
+      });
+    }
+    if (path.startsWith('get-international-airtime-product-types')) {
+      return json(200, { response_description: '000', content: [{ product_type_id: 4, name: 'Mobile Data' }, { product_type_id: 1, name: 'Mobile Top Up' }] });
+    }
+    if (path.startsWith('get-international-airtime-operators')) {
+      return json(200, { response_description: '000', content: [{ operator_id: '5', name: 'Ghana MTN', operator_image: 'https://x/80.png' }] });
+    }
+    if (path.startsWith('service-variations') && path.includes('foreign-airtime')) {
+      return json(200, {
+        response_description: '000',
+        content: {
+          serviceID: 'foreign-airtime',
+          variations: [
+            { variation_code: '2470', name: '15EUR Top Up', variation_amount: '15.00', fixedPrice: 'Yes', charged_amount: '27000' },
+            { variation_code: '4987', name: '5 -500 GHS Top Up', variation_amount: '0.00', fixedPrice: 'No', variation_rate: '105' },
+            { variation_code: '13056', name: 'Gaga Time - 5GB Mobile Data', variation_amount: '0.00', fixedPrice: 'Yes' },
+          ],
+        },
+      });
+    }
     if (path === 'merchant-verify') {
       if (body.billersCode !== '1212121212') {
         return json(200, { code: '000', content: { error: 'This Smartcard number is invalid' } });
@@ -67,6 +97,18 @@ function fakeVtpass() {
           Current_Bouquet: body.serviceID === 'gotv' ? 'GOtv Max' : 'DStv Compact',
           Renewal_Amount: body.serviceID === 'gotv' ? 3600 : 7900,
         },
+      });
+    }
+    if (path === 'pay' && body.serviceID === 'foreign-airtime') {
+      expect(body.request_id).toMatch(/^\d{12}[A-Z0-9]+$/);
+      const ok = body.billersCode === '08011111111' || body.billersCode === '233241234567';
+      if (!ok) return json(200, { code: '016', response_description: 'TRANSACTION FAILED', content: { transactions: { status: 'failed' } } });
+      paid.set(body.request_id, 'delivered');
+      const naira = body.variation_code === '2470' ? 27000 : Number(body.amount) * 105;
+      return json(200, {
+        ...tx('delivered', naira, body.request_id),
+        purchased_code: body.product_type_id === '3' ? 'PIN 1234-5678' : '',
+        cards: body.product_type_id === '3' ? [{ pin: '1234-5678', serial: 'SN01' }] : null,
       });
     }
     if (path === 'pay') {
@@ -112,7 +154,7 @@ beforeEach(() => {
     timeoutMs: 2000,
     fetchImpl: fake.fetchImpl,
   });
-  setBillProvider(createRouter({ base: simulator, routes: { cable: vt } }));
+  setBillProvider(createRouter({ base: simulator, routes: { cable: vt, international: vt } }));
 });
 
 afterAll(() => setBillProvider(null));
@@ -314,5 +356,85 @@ describe('pending and timeouts', () => {
     const fresh = await Transaction.findById(t._id);
     expect(fresh.status).toBe('failed');
     expect((await balanceOf(u.token)).balance).toBe(9850);
+  });
+});
+
+describe('international airtime / data / PINs', () => {
+  test('countries, product types and operators come from VTpass', async () => {
+    const u = await readyUser();
+    const countries = (await api().get('/api/services/international/countries').set(tv(u))).body.data;
+    expect(countries[0]).toEqual(expect.objectContaining({ code: 'GH', name: 'Ghana', flag: '🇬🇭', dialCode: '+233', currency: 'GHS' }));
+    const types = (await api().get('/api/services/international/product-types?country=GH').set(tv(u))).body.data;
+    expect(types).toEqual([{ id: '4', name: 'Mobile Data' }, { id: '1', name: 'Mobile Top Up' }]);
+    const ops = (await api().get('/api/services/international/operators?country=GH&productType=1').set(tv(u))).body.data;
+    expect(ops[0]).toEqual(expect.objectContaining({ id: '5', name: 'Ghana MTN' }));
+  });
+
+  test('plans: fixed price in naira, flexible with rate and range, unpriced left out', async () => {
+    const u = await readyUser();
+    const r = (await api().get('/api/services/international/variations?country=GH&operator=5&productType=1').set(tv(u))).body.data;
+    expect(r.currency).toBe('GHS');
+    expect(r.variations.map((v) => v.code)).toEqual(['2470', '4987']);
+    expect(r.variations[0]).toEqual(expect.objectContaining({ fixed: true, nairaAmount: 27000 }));
+    expect(r.variations[1]).toEqual(expect.objectContaining({ fixed: false, rate: 105, min: 5, max: 500 }));
+    expect(await AdminAlert.exists({ title: 'International prices missing' })).toBeNull();
+  });
+
+  test('fixed plan: charged VTpass\'s naira price; payload matches the docs', async () => {
+    const u = await readyUser({ fund: 30000 });
+    const r = await api().post('/api/services/international').set(tv(u)).send({
+      country: 'GH', productType: '1', operator: '5', variationCode: '2470', phone: '0241234567', pin: u.pin,
+    });
+    expect(r.status).toBe(201);
+    const t = r.body.data.transaction;
+    expect(t.status).toBe('success');
+    expect(t.amount).toBe(27000);
+    expect(t.recipient).toBe('+233241234567');
+    const pay = fake.calls.find((c) => c.path === 'pay');
+    expect(pay.body).toEqual(expect.objectContaining({
+      serviceID: 'foreign-airtime', billersCode: '233241234567', variation_code: '2470',
+      operator_id: '5', country_code: 'GH', product_type_id: '1', email: u.email,
+    }));
+    expect(pay.body.amount).toBeUndefined();
+  });
+
+  test('flexible top-up: local amount × rate; amount sent to VTpass', async () => {
+    const u = await readyUser({ fund: 30000 });
+    const r = await api().post('/api/services/international').set(tv(u)).send({
+      country: 'GH', productType: '1', operator: '5', variationCode: '4987', phone: '241234567', amount: 20, pin: u.pin, email: 'friend@example.com',
+    });
+    expect(r.body.data.transaction.amount).toBe(2100);
+    const pay = fake.calls.find((c) => c.path === 'pay');
+    expect(pay.body.amount).toBe(20);
+    expect(pay.body.email).toBe('friend@example.com');
+    const out = await api().post('/api/services/international').set(tv(u)).send({
+      country: 'GH', productType: '1', operator: '5', variationCode: '4987', phone: '241234567', amount: 600, pin: u.pin,
+    });
+    expect(out.body.code).toBe('AMOUNT_OUT_OF_RANGE');
+  });
+
+  test('sandbox test number goes through unchanged; failures refund', async () => {
+    const u = await readyUser({ fund: 30000 });
+    const ok = await api().post('/api/services/international').set(tv(u)).send({
+      country: 'GH', productType: '1', operator: '5', variationCode: '2470', phone: '08011111111', pin: u.pin,
+    });
+    expect(ok.body.data.transaction.status).toBe('success');
+    const bad = await api().post('/api/services/international').set(tv(u)).send({
+      country: 'GH', productType: '1', operator: '5', variationCode: '2470', phone: '244444444', pin: u.pin,
+    });
+    expect(bad.body.data.transaction.status).toBe('failed');
+    expect(bad.body.data.transaction.refunded).toBe(true);
+    expect((await balanceOf(u.token)).balance).toBe(29550 - 27000);
+  });
+
+  test('PIN products: codes from VTpass appear on the receipt', async () => {
+    const bp = require('../src/providers/bill').billProvider();
+    const r = await bp.purchase({
+      service: 'international', requestId: '202610191400DPPIN0001', recipient: '+233241234567', amount: 2700000,
+      country: 'GH', productType: '3', operator: '5', variationCode: '2470', fixed: true, email: 'a@b.co', phone: '241234567',
+    });
+    expect(r.status).toBe('success');
+    expect(r.data.token).toBe('PIN 1234-5678');
+    expect(r.data.pins).toEqual([{ pin: '1234-5678', serial: 'SN01' }]);
   });
 });

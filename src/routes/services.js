@@ -6,7 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const { validate, z, fields } = require('../middleware/validate');
 const { asyncHandler, ok } = require('../utils/helpers');
 const { toKobo, toNaira } = require('../utils/money');
-const { badRequest } = require('../utils/errors');
+const { badRequest, unavailable } = require('../utils/errors');
 const { billProvider } = require('../providers/bill');
 const { getSettings } = require('../services/settings');
 const { executePurchase } = require('../services/purchase');
@@ -417,9 +417,18 @@ router.get(
   validate({
     query: z.object({ country: z.string().length(2), operator: z.string().min(1), productType: z.string().min(1) }),
   }),
-  asyncHandler(async (req, res) =>
-    ok(res, await p().intlVariations(req.query.country, req.query.operator, req.query.productType)),
-  ),
+  asyncHandler(async (req, res) => {
+    const r = await p().intlVariations(req.query.country, req.query.operator, req.query.productType);
+    ok(res, {
+      ...r,
+      variations: r.variations.map((v) => ({
+        ...v,
+        rate: v.rate ?? null,
+        // Naira price for fixed plans when the provider gives one
+        nairaAmount: v.nairaAmount !== undefined && v.nairaAmount !== null ? toNaira(v.nairaAmount) : null,
+      })),
+    });
+  }),
 );
 
 router.post(
@@ -446,24 +455,44 @@ router.post(
     const { rate, currency, variations } = await p().intlVariations(b.country, b.operator, b.productType);
     const v = variations.find((x) => x.code === b.variationCode);
     if (!v) throw badRequest('Choose a valid plan.', 'PLAN_NOT_FOUND');
+    // Each plan may carry its own rate (VTpass); otherwise the operator rate.
+    const planRate = v.rate || rate;
     let foreign;
-    if (v.fixed) foreign = v.amount;
-    else {
+    let amount;
+    if (v.fixed) {
+      foreign = v.amount || null;
+      amount = v.nairaAmount ?? (foreign && planRate ? toKobo(foreign * planRate) : null);
+    } else {
       foreign = Number(b.amount);
       if (!Number.isFinite(foreign) || foreign < (v.min || 0) || foreign > (v.max || Infinity)) {
         throw badRequest(`Enter an amount between ${currency} ${v.min} and ${currency} ${v.max}.`, 'AMOUNT_OUT_OF_RANGE');
       }
+      amount = planRate ? toKobo(foreign * planRate) : null;
     }
-    const amount = toKobo(foreign * rate);
+    if (!amount || amount <= 0) {
+      throw unavailable('The price for this plan isn\'t available right now. Please try another.', 'PRICE_UNAVAILABLE');
+    }
+    const local = b.phone.replace(/^\+/, '');
+    // "0241234567" in Ghana is dialled internationally as +233 241234567
+    const national = local.startsWith(country.dialCode.replace('+', '')) ? local.slice(country.dialCode.length - 1) : local.replace(/^0+/, '');
     const txn = await executePurchase({
       user: req.user,
       service: 'international',
       pin: b.pin,
       amount,
-      recipient: `${country.dialCode}${b.phone.replace(/^\+/, '')}`,
+      recipient: `${country.dialCode}${national}`,
       description: `${operator.name} · ${country.name}`,
-      providerParams: { country: b.country, productType: b.productType, operator: b.operator, variationCode: v.code, foreignAmount: foreign, email: b.email || null },
-      metadata: { country: country.name, operator: operator.name, currency, foreignAmount: foreign, rate, plan: v.name },
+      providerParams: {
+        country: b.country,
+        productType: b.productType,
+        operator: b.operator,
+        variationCode: v.code,
+        foreignAmount: foreign,
+        fixed: Boolean(v.fixed),
+        email: b.email || req.user.email,
+        phone: local,
+      },
+      metadata: { country: country.name, operator: operator.name, currency, foreignAmount: foreign, rate: planRate, plan: v.name },
     });
     respond(res, txn);
   }),

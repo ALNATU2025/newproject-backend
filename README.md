@@ -89,11 +89,12 @@ Also `GET /status` (which services are on, maintenance), `GET /rates`, `GET /lim
 
 ## VTpass (live bill payments)
 
-TV subscriptions (DStv, GOtv, StarTimes) are connected to VTpass. Set in `.env`:
+Connected to VTpass so far: **TV subscriptions** (DStv, GOtv, StarTimes) and
+**international airtime / data / PINs**. Set in `.env`:
 
 ```
 VTPASS_ENV=sandbox            # then live once VTpass enables your account
-VTPASS_SERVICES=cable         # services sent to VTpass; others use BILL_PROVIDER
+VTPASS_SERVICES=cable,international   # sent to VTpass; others use BILL_PROVIDER
 VTPASS_API_KEY=...            # vtpass.com → Profile → API Keys
 VTPASS_PUBLIC_KEY=PK_...
 VTPASS_SECRET_KEY=SK_...
@@ -110,7 +111,14 @@ VTPASS_SECRET_KEY=SK_...
 - Renewal is offered only when VTpass returns a renewal amount; StarTimes is
   always "choose a package", one period at a time.
 
-Sandbox smartcard `1212121212` succeeds; `201000000000` stays pending;
+- International plans are sold at VTpass's naira price: `charged_amount` for
+  fixed plans, `variation_rate` × the local amount for top-ups. A plan without
+  either is hidden (and an admin alert is raised) rather than sold at a guess.
+  Numbers are sent in international form (e.g. `233241234567`); PINs and
+  instructions VTpass returns are shown on the receipt.
+
+International sandbox: phone `08011111111` succeeds (passed through as typed).
+TV sandbox: smartcard `1212121212` succeeds; `201000000000` stays pending;
 `300000000000` times out; any other number fails.
 
 ## Adding another provider
