@@ -3,7 +3,7 @@
 const mongoose = require('mongoose');
 const env = require('../config/env');
 const { supportsTransactions } = require('../config/db');
-const { mailMethod } = require('./mail');
+const { mailMethod, getLastMailError } = require('./mail');
 const { billProvider } = require('../providers/bill');
 const { paymentProvider } = require('../providers/payment');
 const { getSettings } = require('./settings');
@@ -25,8 +25,13 @@ async function readiness() {
     weakJwt ? 'Use a long random value (at least 32 characters)' : 'Set');
 
   const mail = mailMethod();
-  add('email', 'Email for sign-up codes', mail === 'none' ? 'fail' : 'ok',
-    mail === 'none' ? 'Set RESEND_API_KEY (recommended on Render) or SMTP_* — nobody can sign up without codes' : `Sending with ${mail} as ${env.smtp.from}`);
+  const mailError = getLastMailError();
+  add('email', 'Email for sign-up codes', mail === 'none' || mailError ? 'fail' : 'ok',
+    mail === 'none'
+      ? 'Set RESEND_API_KEY (recommended on Render) or SMTP_* — nobody can sign up without codes'
+      : mailError
+        ? `Last email failed (${mailError.at}): ${mailError.hint}`
+        : `Sending with ${mail} as ${env.smtp.from}`);
 
   const vt = env.vtpass;
   const keys = Boolean(vt.apiKey && vt.publicKey && vt.secretKey);

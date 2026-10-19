@@ -28,13 +28,18 @@ function createApp() {
 
   // Plain status for a browser or uptime monitor. No secrets — only yes/no.
   const status = () => {
-    const { isMailConfigured } = require('./services/mail'); // eslint-disable-line global-require
+    const { isMailConfigured, getLastMailError } = require('./services/mail'); // eslint-disable-line global-require
+    const mailError = getLastMailError();
     const vt = env.vtpass;
     return {
       status: 'ok',
       mode: env.nodeEnv,
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      email: isMailConfigured() ? 'configured' : 'NOT configured — set RESEND_API_KEY',
+      email: !isMailConfigured()
+        ? 'NOT configured — set RESEND_API_KEY'
+        : mailError
+          ? `configured, but the last email FAILED at ${mailError.at}: ${mailError.hint}`
+          : 'configured',
       vtpass: {
         mode: vt.environment,
         keys: vt.apiKey && vt.publicKey && vt.secretKey ? 'set' : 'MISSING',

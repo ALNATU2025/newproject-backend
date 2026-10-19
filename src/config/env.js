@@ -12,6 +12,11 @@ const isTest = nodeEnv === 'test';
  * ALLOW_SIMULATOR_IN_PRODUCTION=true is set on purpose.
  */
 const startupWarnings = [];
+// Values pasted into a dashboard often carry spaces or quotes.
+function clean(v) {
+  return String(v || '').trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+}
+
 function safeProvider(name) {
   const v = (process.env[name] || (isProd ? 'none' : 'simulator')).toLowerCase();
   if (isProd && v === 'simulator' && process.env.ALLOW_SIMULATOR_IN_PRODUCTION !== 'true') {
@@ -48,10 +53,10 @@ const env = {
     port: Number(process.env.SMTP_PORT || 587),
     user: process.env.SMTP_USER || '',
     pass: process.env.SMTP_PASS || '',
-    from: process.env.MAIL_FROM || 'Dalabapay <no-reply@dalabapay.com>',
+    from: clean(process.env.MAIL_FROM) || 'Dalabapay <no-reply@dalabapay.com>',
   },
 
-  resendApiKey: process.env.RESEND_API_KEY || '',
+  resendApiKey: clean(process.env.RESEND_API_KEY),
 
   billProvider: safeProvider('BILL_PROVIDER'),
   paymentProvider: safeProvider('PAYMENT_PROVIDER'),

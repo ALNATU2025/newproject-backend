@@ -37,7 +37,30 @@ async function issueCode(email, purpose, payload = null) {
     { upsert: true, new: true },
   );
   const { subject, text } = codeEmail(code, purpose);
-  await sendMail({ to: email, subject, text });
+  try {
+    await sendMail({ to: email, subject, text });
+  } catch (err) {
+    // Not sent: put things back so the person can try again straight away.
+    if (existing) {
+      await Otp.updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            codeHash: existing.codeHash,
+            attempts: existing.attempts,
+            payload: existing.payload,
+            verifiedToken: existing.verifiedToken,
+            expiresAt: existing.expiresAt,
+            updatedAt: new Date(0),
+          },
+        },
+        { timestamps: false },
+      );
+    } else {
+      await Otp.deleteOne({ email, purpose });
+    }
+    throw err;
+  }
   const exposeCode = !env.isProd && !isMailConfigured();
   return exposeCode ? { devCode: code } : {};
 }

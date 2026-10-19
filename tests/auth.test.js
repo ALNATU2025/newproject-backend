@@ -153,3 +153,37 @@ describe('records from another app', () => {
     await User.collection.deleteOne({ email: 'old@example.com' });
   });
 });
+
+describe('email service refuses the message', () => {
+  test('sign-up gets a clear 503, can retry at once, and /health shows the cause', async () => {
+    const env = require('../src/config/env');
+    const realFetch = global.fetch;
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    env.resendApiKey = 're_test';
+    global.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({
+        statusCode: 403,
+        message: 'You can only send testing emails to your own email address (owner@example.com).',
+      }),
+    }));
+    try {
+      const body = { fullName: 'Mail Fail', email: 'mailfail@example.com', phone: '08033334444', password: 'Passw0rdOk' };
+      const r = await api().post('/api/auth/register').send(body);
+      expect(r.status).toBe(503);
+      expect(r.body.code).toBe('EMAIL_FAILED');
+      // Retry is not blocked by the 45-second wait.
+      const again = await api().post('/api/auth/register').send(body);
+      expect(again.body.code).toBe('EMAIL_FAILED');
+      const h = await api().get('/health');
+      expect(h.body.email).toMatch(/FAILED.*test mode/);
+      expect(h.body.email).not.toMatch(/owner@example\.com/);
+      expect(errSpy.mock.calls.join(' ')).toMatch(/Email NOT sent \(403\)/);
+    } finally {
+      global.fetch = realFetch;
+      env.resendApiKey = '';
+      errSpy.mockRestore();
+    }
+  });
+});
