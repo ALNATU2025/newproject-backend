@@ -26,12 +26,29 @@ function createApp() {
   app.use(express.json({ limit: '200kb' }));
   if (!env.isTest) app.use(morgan(env.isProd ? 'combined' : 'dev'));
 
+  // Plain status for a browser or uptime monitor. No secrets — only yes/no.
+  const status = () => {
+    const { isMailConfigured } = require('./services/mail'); // eslint-disable-line global-require
+    const vt = env.vtpass;
+    return {
+      status: 'ok',
+      mode: env.nodeEnv,
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      email: isMailConfigured() ? 'configured' : 'NOT configured — set RESEND_API_KEY',
+      vtpass: {
+        mode: vt.environment,
+        keys: vt.apiKey && vt.publicKey && vt.secretKey ? 'set' : 'MISSING',
+        services: vt.services,
+      },
+    };
+  };
+  app.get('/', (req, res) => res.json({ success: true, data: { name: 'Dalabapay API', ...status() } }));
+  app.head('/', (req, res) => res.status(200).end());
   app.get('/health', (req, res) =>
     res.json({
       success: true,
       data: {
-        status: 'ok',
-        database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        ...status(),
         time: new Date().toISOString(),
       },
     }),
