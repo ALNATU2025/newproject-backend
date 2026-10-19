@@ -87,6 +87,39 @@ Also `GET /status` (which services are on, maintenance), `GET /rates`, `GET /lim
 - Roles (super): `GET /roles`, `POST /roles {userId|email, role}`
 - Settings: `GET|PATCH /settings`, `GET /provider`, `POST /provider/health`, `POST /provider/test`, `GET /commission`, `PATCH /commission/rates/:service`, `GET /limits`, `PUT /limits/defaults`, `GET|PUT /limits/users/:id`
 
+## Going live on Render (https://newproject-backend-bod8.onrender.com)
+
+1. **Database** — MongoDB Atlas (free M0 is fine). Network Access: allow
+   `0.0.0.0/0` (Render IPs change) and copy the connection string.
+2. **Email** — create a free [Resend](https://resend.com) account, verify
+   your domain (or use `onboarding@resend.dev` for first tests) and create an
+   API key. Without email nobody can receive sign-up codes in production.
+3. **Render → Environment** — set the variables in `render.yaml`:
+   `NODE_ENV=production`, `MONGO_URI`, `JWT_SECRET` (long random),
+   `RESEND_API_KEY`, `MAIL_FROM`, `SUPER_ADMIN_EMAILS=<your email>`,
+   `BILL_PROVIDER=none`, `PAYMENT_PROVIDER=none`, `VTPASS_ENV=sandbox`,
+   `VTPASS_SERVICES=cable,international` and the three `VTPASS_*_KEY`s.
+4. **VTpass** — profile → API Keys; set authentication type to *API Keys*.
+   If VTpass asks for IP whitelisting, add the *Outbound IPs* shown in
+   Render → your service → Connect.
+5. Deploy, sign up in the app with the `SUPER_ADMIN_EMAILS` address (you
+   become Super Admin), open **Admin → Provider Settings → Go-live
+   checklist** and fix anything red.
+6. **Sandbox test** — Admin → Self Fund ₦20,000, then buy DStv/GOtv on
+   smartcard `1212121212` and international airtime to `08011111111`.
+7. **Live** — when VTpass enables your live account: live keys,
+   `VTPASS_ENV=live`, top up the VTpass wallet, redeploy, and make one small
+   real payment (e.g. StarTimes Nova daily ₦90) before inviting users.
+8. In **Service Controls**, switch off services that aren't connected yet
+   (airtime, data, electricity, education, insurance, transfers if wanted).
+
+`npm run vtpass-check` (Render shell or your computer with the same env)
+checks keys, balance, bouquets and countries without spending anything.
+
+Safety in production: the simulator is refused (it would take real wallet
+money for nothing), test-mode routes are off, codes are never logged, and
+`/api/admin/readiness` lists anything still missing.
+
 ## VTpass (live bill payments)
 
 Connected to VTpass so far: **TV subscriptions** (DStv, GOtv, StarTimes) and

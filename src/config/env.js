@@ -6,6 +6,21 @@ const nodeEnv = process.env.NODE_ENV || 'development';
 const isProd = nodeEnv === 'production';
 const isTest = nodeEnv === 'test';
 
+/**
+ * The simulator fakes payments, so it is refused in production (it would
+ * take real wallet money for airtime that never arrives) unless
+ * ALLOW_SIMULATOR_IN_PRODUCTION=true is set on purpose.
+ */
+const startupWarnings = [];
+function safeProvider(name) {
+  const v = (process.env[name] || (isProd ? 'none' : 'simulator')).toLowerCase();
+  if (isProd && v === 'simulator' && process.env.ALLOW_SIMULATOR_IN_PRODUCTION !== 'true') {
+    startupWarnings.push(`${name}=simulator is not allowed in production; using "none" instead.`);
+    return 'none';
+  }
+  return v;
+}
+
 function required(name, fallback) {
   const v = process.env[name];
   if (v !== undefined && v !== '') return v;
@@ -36,8 +51,18 @@ const env = {
     from: process.env.MAIL_FROM || 'Dalabapay <no-reply@dalabapay.com>',
   },
 
-  billProvider: (process.env.BILL_PROVIDER || (isProd ? 'none' : 'simulator')).toLowerCase(),
-  paymentProvider: (process.env.PAYMENT_PROVIDER || (isProd ? 'none' : 'simulator')).toLowerCase(),
+  resendApiKey: process.env.RESEND_API_KEY || '',
+
+  billProvider: safeProvider('BILL_PROVIDER'),
+  paymentProvider: safeProvider('PAYMENT_PROVIDER'),
+
+  // Emails promoted to Super Admin at start-up and when they sign up
+  // (for hosts without a shell). Comma-separated.
+  superAdminEmails: (process.env.SUPER_ADMIN_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+  warnings: [],
   // VTpass (https://vtpass.com/documentation). Keys come from your VTpass
   // profile → API Keys. VTPASS_SERVICES lists the services sent to VTpass;
   // the rest use BILL_PROVIDER.
@@ -54,6 +79,8 @@ const env = {
   },
   webhookSecret: process.env.WEBHOOK_SECRET || (isProd ? '' : 'dev-webhook-secret'),
 };
+
+env.warnings = startupWarnings;
 
 if (isProd && env.jwtSecret.length < 32) {
   throw new Error('JWT_SECRET must be at least 32 characters in production');

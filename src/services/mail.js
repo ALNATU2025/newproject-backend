@@ -1,5 +1,7 @@
-// Sends email through SMTP. Without SMTP settings (development) the message
-// is printed to the log instead.
+// Sends email through Resend's HTTPS API (RESEND_API_KEY — works on hosts
+// that block SMTP ports, e.g. Render's free plan) or SMTP. With neither, in
+// development the message is printed to the log; in production nothing is
+// logged (codes must never end up in logs).
 const nodemailer = require('nodemailer');
 const env = require('../config/env');
 
@@ -19,13 +21,34 @@ function getTransporter() {
 }
 
 function isMailConfigured() {
-  return Boolean(env.smtp.host);
+  return Boolean(env.resendApiKey || env.smtp.host);
+}
+
+function mailMethod() {
+  if (env.resendApiKey) return 'resend';
+  if (env.smtp.host) return 'smtp';
+  return 'none';
+}
+
+async function sendWithResend({ to, subject, text, html }) {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.resendApiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: env.smtp.from, to: [to], subject, text, html: html || undefined }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Resend ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return { delivered: true };
 }
 
 async function sendMail({ to, subject, text, html }) {
+  if (env.resendApiKey) return sendWithResend({ to, subject, text, html });
   const t = getTransporter();
   if (!t) {
-    if (!env.isTest) console.log(`[mail:dev] to=${to} subject="${subject}"\n${text}`);
+    if (!env.isTest && !env.isProd) console.log(`[mail:dev] to=${to} subject="${subject}"\n${text}`);
+    if (env.isProd) console.error(`[mail] No email service configured; could not send "${subject.replace(/\d{4,}/g, '******')}"`);
     return { delivered: false };
   }
   await t.sendMail({ from: env.smtp.from, to, subject, text, html: html || undefined });
@@ -44,4 +67,4 @@ function codeEmail(code, purpose) {
   };
 }
 
-module.exports = { sendMail, isMailConfigured, codeEmail };
+module.exports = { sendMail, isMailConfigured, mailMethod, codeEmail };

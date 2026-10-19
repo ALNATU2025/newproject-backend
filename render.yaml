@@ -1,0 +1,40 @@
+# Render blueprint for the Dalabapay API. Secrets (sync: false) are entered
+# in the Render dashboard → Environment, never committed.
+services:
+  - type: web
+    name: newproject-backend
+    runtime: node
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI            # MongoDB Atlas connection string
+        sync: false
+      - key: JWT_SECRET           # long random string (openssl rand -hex 48)
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: RESEND_API_KEY       # resend.com → API Keys (email codes)
+        sync: false
+      - key: MAIL_FROM            # e.g. Dalabapay <no-reply@yourdomain.com>
+        sync: false
+      - key: SUPER_ADMIN_EMAILS   # your email; promoted to Super Admin
+        sync: false
+      - key: BILL_PROVIDER        # services not on VTpass show "not connected"
+        value: none
+      - key: PAYMENT_PROVIDER     # no bank-transfer provider yet
+        value: none
+      - key: VTPASS_ENV           # sandbox first, then live
+        value: sandbox
+      - key: VTPASS_SERVICES
+        value: cable,international
+      - key: VTPASS_API_KEY
+        sync: false
+      - key: VTPASS_PUBLIC_KEY
+        sync: false
+      - key: VTPASS_SECRET_KEY
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true

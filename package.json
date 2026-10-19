@@ -1,7 +1,7 @@
 {
   "name": "dalabapay-backend",
   "version": "1.0.0",
-  "description": "Dalabapay API — wallet, bill payments and admin console (Express + MongoDB)",
+  "description": "Dalabapay API \u2014 wallet, bill payments and admin console (Express + MongoDB)",
   "main": "src/server.js",
   "private": true,
   "engines": {
@@ -11,7 +11,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "jest --runInBand",
-    "make-super-admin": "node scripts/make-super-admin.js"
+    "make-super-admin": "node scripts/make-super-admin.js",
+    "vtpass-check": "node scripts/vtpass-check.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -33,6 +34,8 @@
   "jest": {
     "testEnvironment": "node",
     "testTimeout": 30000,
-    "setupFiles": ["<rootDir>/tests/env.js"]
+    "setupFiles": [
+      "<rootDir>/tests/env.js"
+    ]
   }
 }

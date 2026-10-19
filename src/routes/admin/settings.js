@@ -13,6 +13,7 @@ const { getSettings, updateSettings } = require('../../services/settings');
 const { effectiveLimits } = require('../../services/limits');
 const { audit } = require('../../services/alerts');
 const serialize = require('../../serializers');
+const { readiness } = require('../../services/readiness');
 
 const router = express.Router();
 
@@ -87,6 +88,14 @@ router.patch(
     await audit(req.user._id, 'settings.update', { details: b });
     ok(res, publicSettings(s));
   }),
+);
+
+// ── Go-live checklist ─────────────────────────────────────
+
+router.get(
+  '/readiness',
+  requirePermission('settings:read'),
+  asyncHandler(async (req, res) => ok(res, await readiness())),
 );
 
 // ── Provider ───────────────────────────────────────────────

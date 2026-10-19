@@ -225,3 +225,17 @@ describe('settings, provider, commission, limits', () => {
     await api().put('/api/admin/limits/defaults').set(a).send({ airtime: { perTxn: 50000 } });
   });
 });
+
+describe('go-live checklist', () => {
+  test('lists every check and is not ready in tests', async () => {
+    const { superAdmin, support, customer } = await setup();
+    const r = await api().get('/api/admin/readiness').set(auth(superAdmin.token));
+    expect(r.status).toBe(200);
+    expect(r.body.data.ready).toBe(false);
+    const keys = r.body.data.checks.map((c) => c.key);
+    expect(keys).toEqual(expect.arrayContaining(['environment', 'database', 'jwt', 'email', 'vtpass_keys', 'vtpass_env', 'funding', 'admin']));
+    expect(r.body.data.checks.find((c) => c.key === 'admin').status).toBe('ok');
+    expect((await api().get('/api/admin/readiness').set(auth(support.token))).status).toBe(200);
+    expect((await api().get('/api/admin/readiness').set(auth(customer.token))).status).toBe(403);
+  });
+});

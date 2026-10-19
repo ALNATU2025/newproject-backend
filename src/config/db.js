@@ -40,4 +40,4 @@ async function withTransaction(fn) {
   }
 }
 
-module.exports = { connectDb, disconnectDb, withTransaction };
+module.exports = { connectDb, disconnectDb, withTransaction, supportsTransactions: () => supportsTransactions };

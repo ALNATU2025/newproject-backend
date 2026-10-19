@@ -90,6 +90,8 @@ router.post(
       referredBy: p.referrerId || null,
       isApproved: true,
       lastLoginAt: new Date(),
+      // Owner accounts listed in SUPER_ADMIN_EMAILS become Super Admin.
+      role: env.superAdminEmails.includes(p.email) ? 'super' : 'user',
     });
     await otp.deleteCode(email, 'register');
     await raiseAlert({
