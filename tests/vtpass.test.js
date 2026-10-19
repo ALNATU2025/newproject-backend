@@ -414,7 +414,7 @@ describe('international airtime / data / PINs', () => {
   });
 
   test('sandbox test number goes through unchanged; failures refund', async () => {
-    const u = await readyUser({ fund: 30000 });
+    const u = await readyUser({ fund: 60000 });
     const ok = await api().post('/api/services/international').set(tv(u)).send({
       country: 'GH', productType: '1', operator: '5', variationCode: '2470', phone: '08011111111', pin: u.pin,
     });
@@ -424,7 +424,7 @@ describe('international airtime / data / PINs', () => {
     });
     expect(bad.body.data.transaction.status).toBe('failed');
     expect(bad.body.data.transaction.refunded).toBe(true);
-    expect((await balanceOf(u.token)).balance).toBe(29550 - 27000);
+    expect((await balanceOf(u.token)).balance).toBe(59100 - 27000);
   });
 
   test('PIN products: codes from VTpass appear on the receipt', async () => {
