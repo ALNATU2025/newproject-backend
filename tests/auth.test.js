@@ -177,8 +177,8 @@ describe('email service refuses the message', () => {
       const again = await api().post('/api/auth/register').send(body);
       expect(again.body.code).toBe('EMAIL_FAILED');
       const h = await api().get('/health');
-      expect(h.body.email).toMatch(/FAILED.*test mode/);
-      expect(h.body.email).not.toMatch(/owner@example\.com/);
+      expect(h.body.data.email).toMatch(/FAILED.*test mode/);
+      expect(h.body.data.email).not.toMatch(/owner@example\.com/);
       expect(errSpy.mock.calls.join(' ')).toMatch(/Email NOT sent \(403\)/);
     } finally {
       global.fetch = realFetch;
