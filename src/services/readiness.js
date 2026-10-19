@@ -68,6 +68,14 @@ async function readiness() {
       ? pay.name
       : 'No bank-transfer provider yet: fund wallets from the admin console (Fund Wallet / Self Fund) for testing');
 
+  // Records written by another app (e.g. the old Dalabapay backend) in the
+  // same database: they have no passwordHash and can't log in here.
+  const legacy = await User.countDocuments({ passwordHash: { $exists: false } });
+  add('database_name', 'Database is only used by this server', legacy ? 'fail' : 'ok',
+    legacy
+      ? `${legacy} account(s) from another app are in this database. Give this server its own database name in MONGO_URI (e.g. …mongodb.net/dalabapay_live?…).`
+      : 'No foreign records');
+
   const supers = await User.countDocuments({ role: 'super', isActive: true });
   add('admin', 'Super Admin account', supers > 0 ? 'ok' : 'fail',
     supers > 0 ? `${supers} active` : 'Sign up, then set SUPER_ADMIN_EMAILS=you@example.com and restart');

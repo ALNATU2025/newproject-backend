@@ -142,3 +142,14 @@ describe('payment PIN', () => {
     expect((await api().post('/api/auth/pin/verify').set(auth(u.token)).send({ pin: '864201' })).status).toBe(200);
   });
 });
+
+describe('records from another app', () => {
+  test('a user without passwordHash gets a clear 401, not a crash', async () => {
+    const { User } = require('../src/models');
+    await User.collection.insertOne({ email: 'old@example.com', phone: '08055550000', password: '$2a$10$abc', fullName: 'Old User' });
+    const r = await api().post('/api/auth/login').send({ identifier: 'old@example.com', password: 'whatever1A' });
+    expect(r.status).toBe(401);
+    expect(r.body.code).toBe('LEGACY_ACCOUNT');
+    await User.collection.deleteOne({ email: 'old@example.com' });
+  });
+});

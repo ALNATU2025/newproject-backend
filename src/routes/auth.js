@@ -132,6 +132,13 @@ router.post(
     const id = req.body.identifier.toLowerCase();
     const query = id.includes('@') ? { email: id } : { phone: id.replace(/\s+/g, '') };
     const user = await User.findOne(query).select('+passwordHash');
+    if (user && !user.passwordHash) {
+      // A record left by another app in the same database (no passwordHash).
+      throw unauthorized(
+        'This account was created in the old Dalabapay app and can\'t sign in here. Please create a new account.',
+        'LEGACY_ACCOUNT',
+      );
+    }
     const okPassword = user && (await bcrypt.compare(req.body.password, user.passwordHash));
     if (!okPassword) throw unauthorized('Incorrect email/phone or password.', 'INVALID_CREDENTIALS');
     if (!user.isActive) {
@@ -194,7 +201,7 @@ router.post(
   validate({ body: z.object({ currentPassword: z.string().min(1), newPassword: fields.password }) }),
   asyncHandler(async (req, res) => {
     const user = await User.findById(req.user._id).select('+passwordHash');
-    if (!(await bcrypt.compare(req.body.currentPassword, user.passwordHash))) {
+    if (!user.passwordHash || !(await bcrypt.compare(req.body.currentPassword, user.passwordHash))) {
       throw badRequest('Your current password is incorrect.', 'WRONG_PASSWORD');
     }
     if (await bcrypt.compare(req.body.newPassword, user.passwordHash)) {
