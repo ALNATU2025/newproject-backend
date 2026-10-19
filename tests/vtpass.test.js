@@ -46,7 +46,7 @@ function fakeVtpass() {
     if (opts.method === 'GET' && !opts.headers['public-key']) throw new Error('GET needs public-key');
     if (opts.method === 'POST' && !opts.headers['secret-key']) throw new Error('POST needs secret-key');
 
-    if (path.startsWith('service-variations')) {
+    if (path.startsWith('service-variations') && !path.includes('foreign-airtime')) {
       const id = new URL(`http://x/${path}`).searchParams.get('serviceID');
       return json(200, { response_description: '000', content: { serviceID: id, variations: VARIATIONS[id] || [] } });
     }
