@@ -38,6 +38,18 @@ function publicSettings(s) {
       indirectBonus: toNaira(s.referral.indirectBonus),
       minFirstDeposit: toNaira(s.referral.minFirstDeposit),
     },
+    // Sierra Leone (Leones)
+    slReferral: {
+      bonus: toNaira(s.slReferral.bonus),
+      indirectBonus: toNaira(s.slReferral.indirectBonus),
+      minFirstDeposit: toNaira(s.slReferral.minFirstDeposit),
+    },
+    slFunding: {
+      minAmount: toNaira(s.slFunding.minAmount),
+      maxAmount: toNaira(s.slFunding.maxAmount),
+      instructions: s.slFunding.instructions,
+      methods: s.slFunding.methods,
+    },
   };
 }
 
@@ -69,6 +81,32 @@ router.patch(
           minFirstDeposit: z.coerce.number().min(0).optional(),
         })
         .optional(),
+      slReferral: z
+        .object({
+          bonus: z.coerce.number().min(0).optional(),
+          indirectBonus: z.coerce.number().min(0).optional(),
+          minFirstDeposit: z.coerce.number().min(0).optional(),
+        })
+        .optional(),
+      slFunding: z
+        .object({
+          minAmount: z.coerce.number().min(0).optional(),
+          maxAmount: z.coerce.number().min(0).optional(),
+          instructions: z.string().trim().max(500).optional(),
+          methods: z
+            .array(
+              z.object({
+                id: z.string().trim().min(1).max(30),
+                name: z.string().trim().min(1).max(60),
+                account: z.string().trim().max(60).default(''),
+                accountName: z.string().trim().max(100).default(''),
+                bankName: z.string().trim().max(100).optional(),
+              }),
+            )
+            .max(8)
+            .optional(),
+        })
+        .optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -80,9 +118,18 @@ router.patch(
     for (const k of ['lowBalanceThreshold', 'minFunding', 'maxFunding', 'minCommissionWithdrawal']) {
       if (b[k] !== undefined) patch[k] = toKobo(b[k]);
     }
-    if (b.referral) {
-      patch.referral = {};
-      for (const [k, v] of Object.entries(b.referral)) if (v !== undefined) patch.referral[k] = toKobo(v);
+    for (const key of ['referral', 'slReferral']) {
+      if (!b[key]) continue;
+      patch[key] = {};
+      for (const [k, v] of Object.entries(b[key])) if (v !== undefined) patch[key][k] = toKobo(v);
+    }
+    if (b.slFunding) {
+      patch.slFunding = {};
+      const f = b.slFunding;
+      if (f.minAmount !== undefined) patch.slFunding.minAmount = toKobo(f.minAmount);
+      if (f.maxAmount !== undefined) patch.slFunding.maxAmount = toKobo(f.maxAmount);
+      if (f.instructions !== undefined) patch.slFunding.instructions = f.instructions;
+      if (f.methods !== undefined) patch.slFunding.methods = f.methods;
     }
     const s = await updateSettings(patch);
     await audit(req.user._id, 'settings.update', { details: b });

@@ -8,7 +8,7 @@ const { notify } = require('./notify');
 const { getSettings } = require('./settings');
 const { fmt } = require('./limits');
 
-async function payBonus(userId, amount, kind, description) {
+async function payBonus(userId, amount, kind, description, currency = 'NGN') {
   if (!userId || amount <= 0) return;
   const field = `referralEarnings.${kind}`;
   const { before, after } = await wallet.credit(userId, amount, {
@@ -30,7 +30,7 @@ async function payBonus(userId, amount, kind, description) {
   });
   await notify(userId, {
     title: 'Referral bonus',
-    body: `${fmt(amount)} ${description.toLowerCase()} has been added to your earnings.`,
+    body: `${fmt(amount, currency)} ${description.toLowerCase()} has been added to your earnings.`,
     kind: 'referral',
   });
 }
@@ -38,7 +38,10 @@ async function payBonus(userId, amount, kind, description) {
 /** Call after money lands in a user's wallet from a deposit. */
 async function onDeposit(userId, depositAmount) {
   const settings = await getSettings();
-  const { bonus, indirectBonus, minFirstDeposit } = settings.referral;
+  const owner = await User.findById(userId).select('country');
+  const sl = owner && owner.country === 'SL';
+  const { bonus, indirectBonus, minFirstDeposit } = sl ? settings.slReferral : settings.referral;
+  const cur = sl ? 'SLE' : 'NGN';
   if (depositAmount < minFirstDeposit) return;
 
   // Only once per user, even if two deposits arrive together.
@@ -52,10 +55,10 @@ async function onDeposit(userId, depositAmount) {
   const referrer = await User.findById(claimed.referredBy).select('fullName referredBy isActive');
   if (!referrer || !referrer.isActive) return;
 
-  await payBonus(claimed._id, bonus, 'welcome', 'Welcome bonus');
-  await payBonus(referrer._id, bonus, 'direct', `Referral bonus for ${claimed.fullName}`);
+  await payBonus(claimed._id, bonus, 'welcome', 'Welcome bonus', cur);
+  await payBonus(referrer._id, bonus, 'direct', `Referral bonus for ${claimed.fullName}`, cur);
   if (referrer.referredBy) {
-    await payBonus(referrer.referredBy, indirectBonus, 'indirect', 'Indirect referral bonus');
+    await payBonus(referrer.referredBy, indirectBonus, 'indirect', 'Indirect referral bonus', cur);
   }
 }
 

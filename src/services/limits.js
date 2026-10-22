@@ -3,9 +3,11 @@ const { Transaction } = require('../models');
 const { SERVICE_LABELS } = require('../models/constants');
 const { unavailable, forbidden, badRequest } = require('../utils/errors');
 const { startOfLagosDay } = require('../utils/helpers');
-const { toNaira } = require('../utils/money');
+const { formatMoney, currencyOfService } = require('../utils/money');
+const { TRANSFER_SERVICES } = require('../models/constants');
 
-const fmt = (kobo) => `₦${toNaira(kobo).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** "₦1,500.00" or "Le 25.00" (pass the currency; Naira by default). */
+const fmt = (minor, currency = 'NGN') => formatMoney(minor, currency || 'NGN');
 
 function assertServiceOpen(service, settings) {
   if (settings.maintenance) {
@@ -44,7 +46,7 @@ async function usedToday(userId, service) {
     status: { $in: ['pending', 'success', 'disputed'] },
     createdAt: { $gte: startOfLagosDay() },
   };
-  if (service === 'transfer') match.type = 'transfer_out';
+  if (TRANSFER_SERVICES.includes(service)) match.type = 'transfer_out';
   else match.service = service;
   const [row] = await Transaction.aggregate([
     { $match: match },
@@ -54,20 +56,21 @@ async function usedToday(userId, service) {
 }
 
 async function assertWithinLimits(user, service, amount, settings) {
+  const cur = currencyOfService(service);
   const min = settings.minimums && settings.minimums[service];
   if (min && amount < min) {
-    throw badRequest(`The minimum for ${SERVICE_LABELS[service]} is ${fmt(min)}.`, 'BELOW_MINIMUM');
+    throw badRequest(`The minimum for ${SERVICE_LABELS[service]} is ${fmt(min, cur)}.`, 'BELOW_MINIMUM');
   }
   const { perTxn, daily } = effectiveLimits(user, service, settings);
   if (perTxn != null && amount > perTxn) {
-    throw badRequest(`The maximum per transaction is ${fmt(perTxn)}.`, 'LIMIT_PER_TRANSACTION');
+    throw badRequest(`The maximum per transaction is ${fmt(perTxn, cur)}.`, 'LIMIT_PER_TRANSACTION');
   }
   if (daily != null) {
     const used = await usedToday(user._id, service);
     if (used + amount > daily) {
       const left = Math.max(0, daily - used);
       throw badRequest(
-        `This goes over your daily limit of ${fmt(daily)}. You can still spend ${fmt(left)} today.`,
+        `This goes over your daily limit of ${fmt(daily, cur)}. You can still spend ${fmt(left, cur)} today.`,
         'LIMIT_DAILY',
       );
     }

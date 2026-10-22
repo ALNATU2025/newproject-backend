@@ -35,7 +35,7 @@ async function requeryTransaction(t, { actor = null } = {}) {
       await payPurchaseCommission(claimed, await getSettings());
       await notify(claimed.user, {
         title: 'Payment successful',
-        body: `${claimed.description} · ${fmt(claimed.amount)} was successful.`,
+        body: `${claimed.description} · ${fmt(claimed.amount, claimed.currency)} was successful.`,
         kind: 'payment',
         data: { transactionId: String(claimed._id) },
       });
@@ -48,7 +48,7 @@ async function requeryTransaction(t, { actor = null } = {}) {
       await refundTransaction(fresh, { reason: r.message || 'Failed at provider', actor, status: 'failed' });
       await notify(fresh.user, {
         title: 'Payment failed',
-        body: `${fresh.description} · ${fmt(fresh.amount)} failed. Your wallet has been refunded.`,
+        body: `${fresh.description} · ${fmt(fresh.amount, fresh.currency)} failed. Your wallet has been refunded.`,
         kind: 'payment',
         data: { transactionId: String(fresh._id) },
       });

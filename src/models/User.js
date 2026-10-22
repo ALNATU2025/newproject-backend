@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ROLES } = require('./constants');
+const { ROLES, COUNTRY_CODES } = require('./constants');
 
 const limitSchema = new mongoose.Schema(
   {
@@ -17,6 +17,10 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, required: true, unique: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
     emailVerified: { type: Boolean, default: false },
+
+    // NG or SL. Decides the services, currency and dashboard the user sees.
+    // Accounts made before countries existed are Nigerian.
+    country: { type: String, enum: COUNTRY_CODES, default: 'NG', index: true },
 
     role: { type: String, enum: ROLES, default: 'user', index: true },
     isActive: { type: Boolean, default: true },

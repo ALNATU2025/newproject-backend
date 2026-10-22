@@ -10,7 +10,10 @@ const transactionSchema = new mongoose.Schema(
     wallet: { type: String, enum: ['main', 'commission'], default: 'main' },
     direction: { type: String, enum: ['credit', 'debit'], required: true },
 
-    // kobo
+    // Currency of the amounts (the owner's country currency).
+    currency: { type: String, enum: ['NGN', 'SLE'], default: null, index: true },
+
+    // minor units (kobo / cents)
     amount: { type: Number, required: true, min: 0 },
     fee: { type: Number, default: 0 },
     commission: { type: Number, default: 0 }, // paid to the user for this purchase
@@ -40,6 +43,14 @@ const transactionSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+// Every transaction is in its owner's currency; filled in automatically.
+transactionSchema.pre('validate', async function setCurrency() {
+  if (this.currency || !this.user) return;
+  const User = mongoose.model('User');
+  const owner = await User.findById(this.user).select('country').session(this.$session() || null).lean();
+  this.currency = owner && owner.country === 'SL' ? 'SLE' : 'NGN';
+});
 
 transactionSchema.index({ user: 1, createdAt: -1 });
 transactionSchema.index({ createdAt: -1 });

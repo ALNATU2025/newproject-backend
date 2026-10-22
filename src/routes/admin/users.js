@@ -5,7 +5,7 @@ const { User, Transaction, AuditLog } = require('../../models');
 const { requirePermission } = require('../../middleware/auth');
 const { validate, z, fields } = require('../../middleware/validate');
 const { asyncHandler, ok, pageParams, escapeRegex, makeReference } = require('../../utils/helpers');
-const { toKobo, toNaira } = require('../../utils/money');
+const { toKobo, toNaira, currencyOf } = require('../../utils/money');
 const { notFound, badRequest, forbidden } = require('../../utils/errors');
 const wallet = require('../../services/wallet');
 const { creditDeposit } = require('../../services/funding');
@@ -14,6 +14,7 @@ const { audit } = require('../../services/alerts');
 const { notify } = require('../../services/notify');
 const { fmt } = require('../../services/limits');
 const serialize = require('../../serializers');
+const { normalizePhone, PHONE_HINT } = require('../../utils/phone');
 
 const router = express.Router();
 const idParam = validate({ params: z.object({ id: fields.objectId }) });
@@ -31,6 +32,7 @@ router.get(
     query: z.object({
       q: z.string().trim().max(60).optional(),
       filter: z.enum(['all', 'active', 'inactive', 'admins', 'pending', 'low_balance']).default('all'),
+      country: z.enum(['NG', 'SL']).optional(),
       page: z.string().optional(),
       limit: z.string().optional(),
     }),
@@ -44,6 +46,8 @@ router.get(
     if (filter === 'admins') where.role = { $ne: 'user' };
     if (filter === 'pending') where.isApproved = false;
     if (filter === 'low_balance') where.balance = { $lt: 500000 };
+    if (req.query.country === 'SL') where.country = 'SL';
+    if (req.query.country === 'NG') where.country = { $ne: 'SL' };
     if (q) {
       const rx = new RegExp(escapeRegex(q), 'i');
       where.$or = [{ fullName: rx }, { email: rx }, { phone: rx }];
@@ -56,7 +60,9 @@ router.get(
       User.countDocuments({ isActive: true }),
       User.countDocuments({ role: { $ne: 'user' } }),
       User.countDocuments({ isApproved: false }),
-      User.aggregate([{ $group: { _id: null, balance: { $sum: '$balance' }, commission: { $sum: '$commissionBalance' } } }]),
+      User.aggregate([
+        { $group: { _id: { $ifNull: ['$country', 'NG'] }, balance: { $sum: '$balance' }, commission: { $sum: '$commissionBalance' }, users: { $sum: 1 } } },
+      ]),
     ]);
     ok(res, {
       items: items.map((u) => serialize.user(u, { admin: true })),
@@ -64,10 +70,16 @@ router.get(
       page,
       hasMore: skip + items.length < total,
       counts: { all, active, inactive: all - active, admins, pending },
-      totals: {
-        walletBalance: toNaira((sums[0] && sums[0].balance) || 0),
-        commissionBalance: toNaira((sums[0] && sums[0].commission) || 0),
-      },
+      // Naira totals (Nigeria) plus a separate Leone total for Sierra Leone.
+      totals: (() => {
+        const ng = sums.find((r) => r._id !== 'SL') || {};
+        const sl = sums.find((r) => r._id === 'SL') || {};
+        return {
+          walletBalance: toNaira(ng.balance || 0),
+          commissionBalance: toNaira(ng.commission || 0),
+          sl: { users: sl.users || 0, walletBalance: toNaira(sl.balance || 0), commissionBalance: toNaira(sl.commission || 0) },
+        };
+      })(),
     });
   }),
 );
@@ -91,7 +103,7 @@ router.patch(
     body: z.object({
       fullName: fields.name.optional(),
       email: fields.email.optional(),
-      phone: fields.phone.optional(),
+      phone: fields.accountPhone.optional(),
       isActive: z.boolean().optional(),
     }),
   }),
@@ -102,6 +114,9 @@ router.patch(
     }
     if (u.role === 'super' && req.user.role !== 'super') {
       throw forbidden('Only a Super Admin can edit another Super Admin.');
+    }
+    if (req.body.phone && !normalizePhone(req.body.phone, u.country || 'NG')) {
+      throw badRequest(PHONE_HINT[u.country || 'NG'], 'VALIDATION_ERROR');
     }
     const before = { fullName: u.fullName, email: u.email, phone: u.phone, isActive: u.isActive };
     Object.assign(u, req.body);
@@ -180,7 +195,7 @@ router.post(
       });
       await notify(u._id, {
         title: action === 'credit' ? 'Wallet credited' : 'Wallet debited',
-        body: `${fmt(amount)} was ${action === 'credit' ? 'added to' : 'taken from'} your wallet (${reason}).`,
+        body: `${fmt(amount, currencyOf(u.country))} was ${action === 'credit' ? 'added to' : 'taken from'} your wallet (${reason}).`,
         kind: 'wallet',
       });
     }

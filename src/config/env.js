@@ -60,6 +60,9 @@ const env = {
 
   billProvider: safeProvider('BILL_PROVIDER'),
   paymentProvider: safeProvider('PAYMENT_PROVIDER'),
+  // Sierra Leone bill provider (airtime, data, EDSA, TV). "none" until the
+  // provider's API is connected.
+  slProvider: safeProvider('SL_PROVIDER'),
 
   // Emails promoted to Super Admin at start-up and when they sign up
   // (for hosts without a shell). Comma-separated.

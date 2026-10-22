@@ -6,7 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const { validate, z, fields } = require('../middleware/validate');
 const { asyncHandler, ok } = require('../utils/helpers');
 const { toKobo, toNaira } = require('../utils/money');
-const { badRequest, unavailable } = require('../utils/errors');
+const { badRequest, unavailable, forbidden } = require('../utils/errors');
 const { billProvider } = require('../providers/bill');
 const { getSettings } = require('../services/settings');
 const { executePurchase } = require('../services/purchase');
@@ -17,6 +17,15 @@ const serialize = require('../serializers');
 
 const router = express.Router();
 router.use(requireAuth);
+
+// Nigerian services: Sierra Leone accounts only get the shared status,
+// rates and limits (their own services are under /api/services/sl).
+const SHARED = new Set(['/status', '/rates', '/limits']);
+router.use((req, res, next) =>
+  next(req.user.country === 'SL' && !SHARED.has(req.path)
+    ? forbidden('This service isn\'t available for your country.', 'WRONG_COUNTRY')
+    : undefined),
+);
 
 const p = () => billProvider();
 const plan = (x) => ({ code: x.code, name: x.name, amount: toNaira(x.amount), validity: x.validity || null });
@@ -40,6 +49,8 @@ router.get(
       maintenanceMessage: s.maintenance ? s.maintenanceMessage : null,
       services: Object.fromEntries(SERVICES.map((k) => [k, s.services[k] !== false])),
       providerConnected: p().isConfigured(),
+      // Per service: whether its provider is connected (payments possible).
+      connected: Object.fromEntries(BILL_SERVICES.map((k) => [k, p().isConfigured(k)])),
       requireApproval: Boolean(s.requireApproval),
     });
   }),

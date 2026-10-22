@@ -13,6 +13,8 @@ const pinService = require('../services/pin');
 const { raiseAlert } = require('../services/alerts');
 const { notify } = require('../services/notify');
 const serialize = require('../serializers');
+const { COUNTRY_CODES } = require('../models/constants');
+const { normalizePhone, anyLocal, PHONE_HINT } = require('../utils/phone');
 
 const router = express.Router();
 
@@ -40,30 +42,41 @@ async function uniqueReferralCode(fullName) {
 
 // ── Sign up ────────────────────────────────────────────────
 
-const registerSchema = z.object({
-  fullName: fields.name,
-  email: fields.email,
-  phone: fields.phone,
-  password: fields.password,
-  referralCode: z.string().trim().toUpperCase().max(20).optional().or(z.literal('')),
-});
+const registerSchema = z
+  .object({
+    fullName: fields.name,
+    email: fields.email,
+    // NG or SL; older app versions don't send it and are Nigerian.
+    country: z.enum(COUNTRY_CODES).default('NG'),
+    phone: z.string().trim().min(6, 'Enter your phone number').max(20),
+    password: fields.password,
+    referralCode: z.string().trim().toUpperCase().max(20).optional().or(z.literal('')),
+  })
+  .transform((v, ctx) => {
+    const phone = normalizePhone(v.phone, v.country);
+    if (!phone) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: PHONE_HINT[v.country] });
+    return { ...v, phone: phone || v.phone };
+  });
 
 /** Step 1: check details and email a 6-digit code. Nothing is saved yet. */
 router.post(
   '/register',
   validate({ body: registerSchema }),
   asyncHandler(async (req, res) => {
-    const { fullName, email, phone, password, referralCode } = req.body;
+    const { fullName, email, phone, password, referralCode, country } = req.body;
     if (await User.exists({ email })) throw conflict('This email address is already registered.', 'EMAIL_TAKEN');
     if (await User.exists({ phone })) throw conflict('This phone number is already registered.', 'PHONE_TAKEN');
     let referrerId = null;
     if (referralCode) {
-      const referrer = await User.findOne({ referralCode }).select('_id');
+      const referrer = await User.findOne({ referralCode }).select('_id country');
       if (!referrer) throw badRequest('This referral code doesn\'t exist.', 'INVALID_REFERRAL');
+      if ((referrer.country || 'NG') !== country) {
+        throw badRequest('This referral code is from another country.', 'INVALID_REFERRAL');
+      }
       referrerId = String(referrer._id);
     }
     const passwordHash = await bcrypt.hash(password, 10);
-    const extra = await otp.issueCode(email, 'register', { fullName, email, phone, passwordHash, referrerId });
+    const extra = await otp.issueCode(email, 'register', { fullName, email, phone, passwordHash, referrerId, country });
     ok(res, { email, message: `We sent a 6-digit code to ${email}.`, ...extra });
   }),
 );
@@ -84,6 +97,7 @@ router.post(
       fullName: p.fullName,
       email: p.email,
       phone: p.phone,
+      country: p.country === 'SL' ? 'SL' : 'NG',
       passwordHash: p.passwordHash,
       emailVerified: true,
       referralCode: await uniqueReferralCode(p.fullName),
@@ -130,7 +144,7 @@ router.post(
   }),
   asyncHandler(async (req, res) => {
     const id = req.body.identifier.toLowerCase();
-    const query = id.includes('@') ? { email: id } : { phone: id.replace(/\s+/g, '') };
+    const query = id.includes('@') ? { email: id } : { phone: anyLocal(id) };
     const user = await User.findOne(query).select('+passwordHash');
     if (user && !user.passwordHash) {
       // A record left by another app in the same database (no passwordHash).

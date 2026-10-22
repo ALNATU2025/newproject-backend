@@ -63,6 +63,7 @@ function createApp() {
   app.use('/api/me', require('./routes/me'));
   app.use('/api/wallet', require('./routes/wallet'));
   app.use('/api/transactions', require('./routes/transactions'));
+  app.use('/api/services/sl', require('./routes/sl'));
   app.use('/api/services', require('./routes/services'));
   app.use('/api/commission', require('./routes/commission'));
   app.use('/api/referrals', require('./routes/referrals'));

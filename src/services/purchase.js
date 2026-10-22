@@ -2,8 +2,9 @@
 //   checks → PIN → duplicate guard → debit wallet → call provider →
 //   success (commission, notify) | pending | failed (automatic refund).
 const { Transaction } = require('../models');
-const { SERVICE_LABELS } = require('../models/constants');
-const { AppError, conflict, unavailable } = require('../utils/errors');
+const { SERVICE_LABELS, countryOfService } = require('../models/constants');
+const { currencyOfService } = require('../utils/money');
+const { AppError, conflict, unavailable, forbidden } = require('../utils/errors');
 const { makeRequestId } = require('../utils/helpers');
 const { billProvider } = require('../providers/bill');
 const wallet = require('./wallet');
@@ -19,6 +20,9 @@ const DUPLICATE_WINDOW_MS = 60 * 1000;
 
 /** Checks that run before any money moves (also used by "review" screens). */
 async function preflight(user, service, amount) {
+  if ((user.country || 'NG') !== countryOfService(service)) {
+    throw forbidden('This service isn\'t available for your country.', 'WRONG_COUNTRY');
+  }
   const settings = await getSettings();
   assertServiceOpen(service, settings);
   assertCanTransact(user, settings);
@@ -47,6 +51,7 @@ async function preflight(user, service, amount) {
 async function executePurchase({ user, service, pin, amount, recipient, description, providerParams = {}, metadata = {} }) {
   const settings = await preflight(user, service, amount);
   await verifyPin(user._id, pin);
+  const cur = currencyOfService(service);
 
   const recent = await Transaction.exists({
     user: user._id,
@@ -61,7 +66,7 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
       type: 'duplicate',
       severity: 'warning',
       title: 'Duplicate attempt blocked',
-      body: `${user.fullName} repeated a ${SERVICE_LABELS[service]} payment of ${fmt(amount)} to ${recipient} within a minute.`,
+      body: `${user.fullName} repeated a ${SERVICE_LABELS[service]} payment of ${fmt(amount, cur)} to ${recipient} within a minute.`,
       user: user._id,
     });
     throw conflict(
@@ -81,6 +86,7 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
       reference,
       type: service,
       direction: 'debit',
+      currency: cur,
       amount,
       status: 'pending',
       service,
@@ -113,7 +119,7 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
       type: 'provider',
       severity: 'warning',
       title: 'Provider did not respond',
-      body: `${reference} (${SERVICE_LABELS[service]}, ${fmt(amount)}) is pending: ${e.message}`,
+      body: `${reference} (${SERVICE_LABELS[service]}, ${fmt(amount, cur)}) is pending: ${e.message}`,
       user: user._id,
       transaction: txn._id,
     });
@@ -129,7 +135,7 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
     await payPurchaseCommission(txn, settings);
     await notify(user._id, {
       title: 'Payment successful',
-      body: `${description} · ${fmt(amount)} was successful.`,
+      body: `${description} · ${fmt(amount, cur)} was successful.`,
       kind: 'payment',
       data: { transactionId: String(txn._id) },
     });
@@ -138,7 +144,7 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
     await txn.save();
     await notify(user._id, {
       title: 'Payment pending',
-      body: `We're confirming your ${description} payment of ${fmt(amount)} with the provider.`,
+      body: `We're confirming your ${description} payment of ${fmt(amount, cur)} with the provider.`,
       kind: 'payment',
       data: { transactionId: String(txn._id) },
     });
@@ -149,7 +155,7 @@ async function executePurchase({ user, service, pin, amount, recipient, descript
     txn = await Transaction.findById(txn._id);
     await notify(user._id, {
       title: 'Payment failed',
-      body: `${description} · ${fmt(amount)} failed. Your wallet has been refunded.`,
+      body: `${description} · ${fmt(amount, cur)} failed. Your wallet has been refunded.`,
       kind: 'payment',
       data: { transactionId: String(txn._id) },
     });

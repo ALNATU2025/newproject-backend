@@ -2,6 +2,8 @@
 //
 //   BILL_PROVIDER    none | simulator | vtpass   — default for every service
 //   VTPASS_SERVICES  e.g. "cable"                 — these go to VTpass instead
+//   SL_PROVIDER      none | simulator | <name>    — Sierra Leone services
+//                    (sl_airtime, sl_data, sl_electricity, sl_cable)
 //
 // So BILL_PROVIDER=simulator + VTPASS_SERVICES=cable sends DStv/GOtv/
 // StarTimes to VTpass and keeps the rest on the simulator. A service routed
@@ -11,7 +13,7 @@
 // Every provider exposes the same functions (see none.js). Amounts are kobo.
 const env = require('../../config/env');
 const { unavailable } = require('../../utils/errors');
-const { BILL_SERVICES } = require('../../models/constants');
+const { BILL_SERVICES, SL_SERVICES } = require('../../models/constants');
 
 const makers = {
   none: () => require('./none'),
@@ -40,6 +42,13 @@ const METHOD_SERVICE = {
   intlProductTypes: 'international',
   intlOperators: 'international',
   intlVariations: 'international',
+  // Sierra Leone
+  slNetworks: 'sl_airtime',
+  slDataPlans: 'sl_data',
+  slVerifyMeter: 'sl_electricity',
+  slCableProviders: 'sl_cable',
+  slCablePlans: 'sl_cable',
+  slVerifySmartcard: 'sl_cable',
 };
 
 /**
@@ -101,6 +110,9 @@ function fromEnv() {
   };
   const base = make(env.billProvider);
   const routes = {};
+  // Sierra Leone services never fall back to the Nigerian provider.
+  const sl = env.slProvider === env.billProvider ? base : make(env.slProvider);
+  for (const s of SL_SERVICES) routes[s] = sl;
   if (env.vtpass.services.length) {
     const vt = env.billProvider === 'vtpass' ? base : make('vtpass');
     for (const s of env.vtpass.services) {

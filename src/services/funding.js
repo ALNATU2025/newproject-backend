@@ -80,14 +80,14 @@ async function creditDeposit({
   const user = await User.findById(userId).select('fullName');
   await notify(userId, {
     title: 'Wallet funded',
-    body: `${fmt(net)} has been added to your wallet.`,
+    body: `${fmt(net, txn.currency)} has been added to your wallet.`,
     kind: 'wallet',
     data: { transactionId: String(txn._id) },
   });
   await raiseAlert({
     type: 'wallet',
     title: 'Wallet funding successful',
-    body: `${user ? user.fullName : 'A user'} funded ${fmt(amount)} (${method}).`,
+    body: `${user ? user.fullName : 'A user'} funded ${fmt(amount, txn.currency)} (${method}).`,
     user: userId,
     transaction: txn._id,
   });

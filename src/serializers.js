@@ -1,6 +1,10 @@
 // Shapes database documents into the JSON the app reads. Money → naira.
 const { toNaira } = require('./utils/money');
 const { permissionsFor } = require('./permissions');
+const { COUNTRIES } = require('./models/constants');
+
+/** { code, name, currency, symbol, dialCode, flag } for a user's country. */
+const countryInfo = (code) => COUNTRIES[code] || COUNTRIES.NG;
 
 const id = (v) => (v && v._id ? String(v._id) : v ? String(v) : null);
 
@@ -11,6 +15,9 @@ function user(u, { admin = false } = {}) {
     fullName: u.fullName,
     email: u.email,
     phone: u.phone,
+    country: countryInfo(u.country).code,
+    currency: countryInfo(u.country).currency,
+    currencySymbol: countryInfo(u.country).symbol,
     role: u.role,
     isAdmin: u.role !== 'user',
     permissions: u.role === 'user' ? [] : permissionsFor(u.role),
@@ -56,7 +63,7 @@ function user(u, { admin = false } = {}) {
 /** Small user summary embedded in admin lists. */
 function userBrief(u) {
   if (!u || !u._id) return null;
-  return { id: id(u), fullName: u.fullName, email: u.email, phone: u.phone };
+  return { id: id(u), fullName: u.fullName, email: u.email, phone: u.phone, country: countryInfo(u.country).code };
 }
 
 function transaction(t, { admin = false } = {}) {
@@ -68,6 +75,8 @@ function transaction(t, { admin = false } = {}) {
     wallet: t.wallet || 'main',
     direction: t.direction,
     isCredit: t.direction === 'credit',
+    // Older records have no currency: they were all Naira.
+    currency: t.currency || (t.user && t.user.country === 'SL' ? 'SLE' : 'NGN'),
     amount: toNaira(t.amount),
     fee: toNaira(t.fee || 0),
     commission: toNaira(t.commission || 0),

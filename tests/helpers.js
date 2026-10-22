@@ -36,9 +36,10 @@ async function signUp(overrides = {}) {
   const body = {
     fullName: overrides.fullName || `Test User${counter}`,
     email: overrides.email || `user${n}${counter}@example.com`,
-    phone: overrides.phone || `080${n}`,
+    phone: overrides.phone || (overrides.country === 'SL' ? `07${n.slice(-7)}` : `080${n}`),
     password: overrides.password || 'Passw0rdOk',
     referralCode: overrides.referralCode || '',
+    ...(overrides.country ? { country: overrides.country } : {}),
   };
   const start = await api().post('/api/auth/register').send(body);
   if (start.status !== 200) throw new Error(`register failed: ${start.status} ${JSON.stringify(start.body)}`);

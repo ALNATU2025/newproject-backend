@@ -8,12 +8,20 @@ const { verifyPin } = require('./pin');
 const { notify } = require('./notify');
 const { getSettings } = require('./settings');
 const { assertServiceOpen, assertCanTransact, assertWithinLimits, fmt } = require('./limits');
+const { currencyOf } = require('../utils/money');
 
-async function findRecipient({ phone, email }) {
+/**
+ * Finds who to send to. With [country] (the sender's), only accounts in the
+ * same country are found: wallets hold different currencies.
+ */
+async function findRecipient({ phone, email, country }) {
   const query = phone ? { phone } : { email: String(email).toLowerCase() };
-  const user = await User.findOne(query).select('fullName phone email isActive');
+  const user = await User.findOne(query).select('fullName phone email isActive country');
   if (!user || !user.isActive) {
     throw notFound('No Dalabapay account found with these details.', 'RECIPIENT_NOT_FOUND');
+  }
+  if (country && (user.country || 'NG') !== country) {
+    throw badRequest('You can only send money to Dalabapay users in your country.', 'RECIPIENT_OTHER_COUNTRY');
   }
   return user;
 }
@@ -22,10 +30,15 @@ async function executeTransfer({ sender, recipient, amount, note, pin }) {
   if (String(recipient._id) === String(sender._id)) {
     throw badRequest('You can\'t send money to yourself.', 'SELF_TRANSFER');
   }
+  if ((recipient.country || 'NG') !== (sender.country || 'NG')) {
+    throw badRequest('You can only send money to Dalabapay users in your country.', 'RECIPIENT_OTHER_COUNTRY');
+  }
+  const service = sender.country === 'SL' ? 'sl_transfer' : 'transfer';
+  const cur = currencyOf(sender.country);
   const settings = await getSettings();
-  assertServiceOpen('transfer', settings);
+  assertServiceOpen(service, settings);
   assertCanTransact(sender, settings);
-  await assertWithinLimits(sender, 'transfer', amount, settings);
+  await assertWithinLimits(sender, service, amount, settings);
   await verifyPin(sender._id, pin);
 
   const reference = makeReference('TR');
@@ -85,12 +98,12 @@ async function executeTransfer({ sender, recipient, amount, note, pin }) {
 
   await notify(recipient._id, {
     title: 'Money received',
-    body: `${sender.fullName} sent you ${fmt(amount)}.${note ? ` Note: ${note}` : ''}`,
+    body: `${sender.fullName} sent you ${fmt(amount, cur)}.${note ? ` Note: ${note}` : ''}`,
     kind: 'wallet',
   });
   await notify(sender._id, {
     title: 'Money sent',
-    body: `You sent ${fmt(amount)} to ${recipient.fullName}.`,
+    body: `You sent ${fmt(amount, cur)} to ${recipient.fullName}.`,
     kind: 'wallet',
     data: { transactionId: String(outTxn._id) },
   });

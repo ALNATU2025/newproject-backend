@@ -47,11 +47,11 @@ async function withdrawCommission(user, amount) {
   const settings = await getSettings();
   const available = user.commissionBalance || 0;
   const value = amount === undefined || amount === null ? available : amount;
-  if (value < settings.minCommissionWithdrawal) {
-    throw badRequest(
-      `You can move earnings once you have ${fmt(settings.minCommissionWithdrawal)} or more.`,
-      'BELOW_MINIMUM',
-    );
+  const sl = user.country === 'SL';
+  const cur = sl ? 'SLE' : 'NGN';
+  const min = sl ? settings.slMinCommissionWithdrawal : settings.minCommissionWithdrawal;
+  if (value < min) {
+    throw badRequest(`You can move earnings once you have ${fmt(min, cur)} or more.`, 'BELOW_MINIMUM');
   }
   if (value > available) throw badRequest('You don\'t have that much in earnings.', 'INSUFFICIENT_EARNINGS');
 
@@ -72,7 +72,7 @@ async function withdrawCommission(user, amount) {
   });
   await notify(user._id, {
     title: 'Earnings moved',
-    body: `${fmt(value)} has been moved from your earnings to your wallet.`,
+    body: `${fmt(value, cur)} has been moved from your earnings to your wallet.`,
     kind: 'commission',
   });
   return txn;

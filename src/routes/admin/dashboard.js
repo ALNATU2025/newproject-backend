@@ -1,6 +1,6 @@
 const express = require('express');
 const { Transaction, User } = require('../../models');
-const { BILL_SERVICES } = require('../../models/constants');
+const { BILL_SERVICES, COUNTRIES, countryOfService } = require('../../models/constants');
 const { requirePermission } = require('../../middleware/auth');
 const { validate, z } = require('../../middleware/validate');
 const { asyncHandler, ok, periodStart, startOfLagosDay } = require('../../utils/helpers');
@@ -9,13 +9,22 @@ const serialize = require('../../serializers');
 
 const router = express.Router();
 
-const periodSchema = z.object({ period: z.enum(['today', 'week', 'month', 'year', 'all']).default('today') });
+const periodSchema = z.object({
+  period: z.enum(['today', 'week', 'month', 'year', 'all']).default('today'),
+  // Figures are per country: the two wallets hold different currencies.
+  country: z.enum(['NG', 'SL']).default('NG'),
+});
 
-async function purchaseTotals(from, to) {
+const billsOf = (country) => BILL_SERVICES.filter((s) => countryOfService(s) === country);
+// Accounts and records from before countries existed are Nigerian.
+const usersOf = (country) => (country === 'SL' ? { country: 'SL' } : { country: { $ne: 'SL' } });
+const txnsOf = (country) => (country === 'SL' ? { currency: 'SLE' } : { currency: { $ne: 'SLE' } });
+
+async function purchaseTotals(from, to, country) {
   const [row] = await Transaction.aggregate([
     {
       $match: {
-        type: { $in: BILL_SERVICES },
+        type: { $in: billsOf(country) },
         status: 'success',
         createdAt: { $gte: from, $lt: to },
       },
@@ -62,7 +71,9 @@ router.get(
   requirePermission('dashboard:read'),
   validate({ query: periodSchema }),
   asyncHandler(async (req, res) => {
-    const { period } = req.query;
+    const { period, country } = req.query;
+    const users = usersOf(country);
+    const txns = txnsOf(country);
     const now = new Date();
     const from = periodStart(period, now);
     const span = now.getTime() - from.getTime();
@@ -70,20 +81,23 @@ router.get(
 
     const [cur, prev, totalUsers, newUsers, prevNewUsers, txCount, pending, volume7d, users7d, recent] =
       await Promise.all([
-        purchaseTotals(from, now),
-        purchaseTotals(prevFrom, from),
-        User.countDocuments({}),
-        User.countDocuments({ createdAt: { $gte: from } }),
-        User.countDocuments({ createdAt: { $gte: prevFrom, $lt: from } }),
-        Transaction.countDocuments({ wallet: 'main', createdAt: { $gte: from } }),
-        Transaction.countDocuments({ status: 'pending' }),
-        last7Days(Transaction, { type: { $in: BILL_SERVICES }, status: 'success' }, 'amount'),
-        last7Days(User, {}, null),
-        Transaction.find({ wallet: 'main' }).sort({ createdAt: -1 }).limit(8).populate('user', 'fullName email phone'),
+        purchaseTotals(from, now, country),
+        purchaseTotals(prevFrom, from, country),
+        User.countDocuments(users),
+        User.countDocuments({ ...users, createdAt: { $gte: from } }),
+        User.countDocuments({ ...users, createdAt: { $gte: prevFrom, $lt: from } }),
+        Transaction.countDocuments({ ...txns, wallet: 'main', createdAt: { $gte: from } }),
+        Transaction.countDocuments({ ...txns, status: 'pending' }),
+        last7Days(Transaction, { type: { $in: billsOf(country) }, status: 'success' }, 'amount'),
+        last7Days(User, users, null),
+        Transaction.find({ ...txns, wallet: 'main' }).sort({ createdAt: -1 }).limit(8).populate('user', 'fullName email phone country'),
       ]);
 
     ok(res, {
       period,
+      country,
+      currency: COUNTRIES[country].currency,
+      currencySymbol: COUNTRIES[country].symbol,
       admin: { fullName: req.user.fullName, role: req.user.role },
       revenue: toNaira(cur.revenue),
       revenueChange: change(cur.revenue, prev.revenue),

@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const { badRequest } = require('../utils/errors');
+const { normalizePhone, PHONE_HINT } = require('../utils/phone');
 
 /**
  * Validates and replaces req.body / req.query / req.params with the parsed
@@ -45,6 +46,24 @@ const fields = {
     .trim()
     .regex(/^0[789][01]\d{8}$/, 'Enter a valid 11-digit Nigerian phone number'),
   anyPhone: z.string().trim().regex(/^\+?\d{6,15}$/, 'Enter a valid phone number'),
+  /** Sierra Leone mobile, stored as 0XXXXXXXX (accepts +232…). */
+  slPhone: z
+    .string()
+    .trim()
+    .transform((v, ctx) => {
+      const n = normalizePhone(v, 'SL');
+      if (!n) ctx.addIssue({ code: z.ZodIssueCode.custom, message: PHONE_HINT.SL });
+      return n || v;
+    }),
+  /** A Nigerian or Sierra Leone account phone, in local form. */
+  accountPhone: z
+    .string()
+    .trim()
+    .transform((v, ctx) => {
+      const n = normalizePhone(v, 'NG') || normalizePhone(v, 'SL');
+      if (!n) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter a valid phone number' });
+      return n || v;
+    }),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters')

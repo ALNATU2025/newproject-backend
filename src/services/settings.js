@@ -4,6 +4,7 @@ const { Setting } = require('../models');
 const { SERVICES, BILL_SERVICES } = require('../models/constants');
 
 const NAIRA = 100;
+const LEONE = 100; // cents
 
 const DEFAULTS = {
   services: Object.fromEntries(SERVICES.map((s) => [s, true])),
@@ -21,6 +22,11 @@ const DEFAULTS = {
     education: { user: 1.5, platform: 1 },
     insurance: { user: 2, platform: 2 },
     international: { user: 1, platform: 2 },
+    // Sierra Leone: set your margins in Admin → Service Commission.
+    sl_airtime: { user: 0, platform: 0 },
+    sl_data: { user: 0, platform: 0 },
+    sl_electricity: { user: 0, platform: 0 },
+    sl_cable: { user: 0, platform: 0 },
   },
 
   // Default limits per service (kobo; null = unlimited)
@@ -33,6 +39,12 @@ const DEFAULTS = {
     insurance: { perTxn: 100_000 * NAIRA, daily: 300_000 * NAIRA },
     international: { perTxn: 50_000 * NAIRA, daily: 150_000 * NAIRA },
     transfer: { perTxn: 500_000 * NAIRA, daily: 2_000_000 * NAIRA },
+    // Sierra Leone, in Leones (cents)
+    sl_airtime: { perTxn: 2_000 * LEONE, daily: 10_000 * LEONE },
+    sl_data: { perTxn: 2_000 * LEONE, daily: 10_000 * LEONE },
+    sl_electricity: { perTxn: 20_000 * LEONE, daily: 50_000 * LEONE },
+    sl_cable: { perTxn: 10_000 * LEONE, daily: 30_000 * LEONE },
+    sl_transfer: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
   },
 
   // Minimum amounts per service (kobo)
@@ -45,9 +57,15 @@ const DEFAULTS = {
     insurance: 500 * NAIRA,
     international: 100 * NAIRA,
     transfer: 100 * NAIRA,
+    sl_airtime: 1 * LEONE,
+    sl_data: 1 * LEONE,
+    sl_electricity: 20 * LEONE,
+    sl_cable: 10 * LEONE,
+    sl_transfer: 5 * LEONE,
   },
 
   minCommissionWithdrawal: 500 * NAIRA,
+  slMinCommissionWithdrawal: 10 * LEONE,
   fundingFeePercent: 1.5,
   minFunding: 100 * NAIRA,
   maxFunding: 1_000_000 * NAIRA,
@@ -57,6 +75,26 @@ const DEFAULTS = {
     bonus: 200 * NAIRA, // to referrer and the new user
     indirectBonus: 20 * NAIRA, // to the referrer's referrer
     minFirstDeposit: 5_000 * NAIRA,
+  },
+
+  // Sierra Leone referral bonuses (Leones, cents). Off until you set them.
+  slReferral: {
+    bonus: 0,
+    indirectBonus: 0,
+    minFirstDeposit: 100 * LEONE,
+  },
+
+  // How Sierra Leone users add money: they pay one of these accounts, then
+  // tap "I've paid" and an admin credits the wallet. Edit in Admin → Settings.
+  slFunding: {
+    minAmount: 10 * LEONE,
+    maxAmount: 100_000 * LEONE,
+    methods: [
+      { id: 'orange', name: 'Orange Money', account: '', accountName: '' },
+      { id: 'afrimoney', name: 'Afrimoney', account: '', accountName: '' },
+      { id: 'bank', name: 'Bank transfer', account: '', accountName: '', bankName: '' },
+    ],
+    instructions: 'Send the money, then tap "I\'ve paid" with the transaction ID. We credit your wallet as soon as we confirm it.',
   },
 
   lowBalanceAlerts: true,

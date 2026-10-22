@@ -115,6 +115,28 @@ function outcomeFor(recipient) {
   return 'success';
 }
 
+// ── Sierra Leone (development only; prices in Leones) ─────────
+const SL_NETWORKS = [
+  { id: 'africell', name: 'Africell' },
+  { id: 'orange', name: 'Orange' },
+  { id: 'qcell', name: 'Qcell' },
+];
+const SL_DATA = [
+  ['d1', '500MB · 1 day', 5, '1 day'],
+  ['d7', '2GB · 7 days', 25, '7 days'],
+  ['d30', '10GB · 30 days', 100, '30 days'],
+];
+const SL_TV = [
+  { id: 'dstv', name: 'DStv' },
+  { id: 'gotv', name: 'GOtv' },
+  { id: 'startimes', name: 'StarTimes' },
+];
+const SL_TV_PLANS = {
+  dstv: [['dstv-access', 'DStv Access', 250], ['dstv-family', 'DStv Family', 450], ['dstv-compact', 'DStv Compact', 800]],
+  gotv: [['gotv-lite', 'GOtv Lite', 60], ['gotv-plus', 'GOtv Plus', 150], ['gotv-max', 'GOtv Max', 250]],
+  startimes: [['st-nova', 'Nova', 50], ['st-basic', 'Basic', 100], ['st-classic', 'Classic', 180]],
+};
+
 const simulator = {
   name: 'simulator',
   environment: 'simulator',
@@ -250,6 +272,39 @@ const simulator = {
     return { currency: c.currency, rate: c.rate, variations };
   },
 
+  async slNetworks() {
+    return SL_NETWORKS;
+  },
+
+  async slDataPlans(network) {
+    if (!SL_NETWORKS.some((n) => n.id === network)) throw badRequest('Unknown network.');
+    return SL_DATA.map(([code, name, price, validity]) => ({ code: `${network}-${code}`, name, amount: price * N, validity }));
+  },
+
+  async slVerifyMeter(meterNumber) {
+    await delay(300);
+    if (String(meterNumber).endsWith('000')) throw badRequest('We couldn\'t find this meter number. Please check it.', 'NOT_FOUND');
+    return { customerName: 'Fatmata Kamara', address: '12 Wilkinson Road, Freetown', meterNumber: String(meterNumber) };
+  },
+
+  async slCableProviders() {
+    return SL_TV;
+  },
+
+  async slCablePlans(provider) {
+    const plans = SL_TV_PLANS[provider];
+    if (!plans) throw badRequest('Choose a valid TV provider.', 'INVALID_PROVIDER');
+    return plans.map(([code, name, price]) => ({ code, name, amount: price * N, validity: '1 month' }));
+  },
+
+  async slVerifySmartcard(provider, smartcardNumber) {
+    await delay(300);
+    if (!SL_TV_PLANS[provider]) throw badRequest('Choose a valid TV provider.', 'INVALID_PROVIDER');
+    if (String(smartcardNumber).endsWith('000')) throw badRequest('We couldn\'t find this smartcard number. Please check it.', 'NOT_FOUND');
+    const [code, name, price] = SL_TV_PLANS[provider][1];
+    return { customerName: 'Mohamed Sesay', currentPlan: name, currentPlanCode: code, renewalAmount: price * N, dueDate: null };
+  },
+
   async purchase({ service, requestId, recipient }) {
     await delay(400);
     const outcome = outcomeFor(recipient);
@@ -261,7 +316,7 @@ const simulator = {
       return { status: 'pending', providerReference, message: 'Waiting for the provider to confirm.' };
     }
     const data = {};
-    if (service === 'electricity') {
+    if (service === 'electricity' || service === 'sl_electricity') {
       data.token = rand(20).replace(/(\d{4})(?=\d)/g, '$1-');
       data.units = '48.6 kWh';
     }

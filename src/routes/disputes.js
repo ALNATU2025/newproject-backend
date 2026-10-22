@@ -79,7 +79,7 @@ router.post(
       type: 'dispute',
       severity: 'warning',
       title: 'New dispute',
-      body: `${req.user.fullName} disputed ${txn.reference} (${fmt(txn.amount)}): ${req.body.reason}`,
+      body: `${req.user.fullName} disputed ${txn.reference} (${fmt(txn.amount, txn.currency)}): ${req.body.reason}`,
       user: req.user._id,
       transaction: txn._id,
     });

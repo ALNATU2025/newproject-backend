@@ -20,7 +20,7 @@ const serialize = require('../../serializers');
 const router = express.Router();
 const idParam = validate({ params: z.object({ id: fields.objectId }) });
 const POPULATE = [
-  { path: 'user', select: 'fullName email phone' },
+  { path: 'user', select: 'fullName email phone country' },
   { path: 'actor', select: 'fullName email phone' },
   { path: 'counterparty', select: 'fullName email phone' },
 ];
@@ -209,7 +209,7 @@ router.patch(
         await t.save();
         if (prev === 'pending' && BILL_SERVICES.includes(t.type) && !t.commission) {
           await payPurchaseCommission(t, await getSettings());
-          await notify(t.user, { title: 'Payment successful', body: `${t.description} · ${fmt(t.amount)} was successful.`, kind: 'payment' });
+          await notify(t.user, { title: 'Payment successful', body: `${t.description} · ${fmt(t.amount, t.currency)} was successful.`, kind: 'payment' });
         }
       } else if (next === 'disputed') {
         t.statusBeforeDispute = prev;

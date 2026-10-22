@@ -56,7 +56,7 @@ async function refundTransaction(txn, { amount, reason, actor = null, status = '
   });
   await notify(txn.user, {
     title: 'Refund received',
-    body: `${fmt(refundAmount)} has been returned to your wallet for ${txn.description || txn.reference}.`,
+    body: `${fmt(refundAmount, txn.currency)} has been returned to your wallet for ${txn.description || txn.reference}.`,
     kind: 'wallet',
     data: { transactionId: String(refund._id) },
   });
