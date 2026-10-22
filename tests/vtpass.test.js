@@ -77,6 +77,8 @@ function fakeVtpass() {
             { variation_code: '2470', name: '15EUR Top Up', variation_amount: '15.00', fixedPrice: 'Yes', charged_amount: '27000' },
             { variation_code: '4987', name: '5 -500 GHS Top Up', variation_amount: '0.00', fixedPrice: 'No', variation_rate: '105' },
             { variation_code: '13056', name: 'Gaga Time - 5GB Mobile Data', variation_amount: '0.00', fixedPrice: 'Yes' },
+            // Marked fixed but really a range: needs an amount at pay time.
+            { variation_code: '4988', name: '160 -2000 GMD Top Up', variation_amount: '0.00', fixedPrice: 'Yes', variation_rate: '30' },
           ],
         },
       });
@@ -101,10 +103,14 @@ function fakeVtpass() {
     }
     if (path === 'pay' && body.serviceID === 'foreign-airtime') {
       expect(body.request_id).toMatch(/^\d{12}[A-Z0-9]+$/);
+      const missing = !body.email || !body.phone || !body.operator_id || !body.country_code || !body.product_type_id
+        || (['4987', '4988'].includes(body.variation_code) && !body.amount);
+      if (missing) return json(200, { code: '011', response_description: 'INVALID ARGUMENTS', content: { errors: ['missing field'] } });
       const ok = body.billersCode === '08011111111' || body.billersCode === '233241234567';
       if (!ok) return json(200, { code: '016', response_description: 'TRANSACTION FAILED', content: { transactions: { status: 'failed' } } });
       paid.set(body.request_id, 'delivered');
-      const naira = body.variation_code === '2470' ? 27000 : Number(body.amount) * 105;
+      const naira = body.variation_code === '2470' ? 27000
+        : Number(body.amount) * (body.variation_code === '4988' ? 30 : 105);
       return json(200, {
         ...tx('delivered', naira, body.request_id),
         purchased_code: body.product_type_id === '3' ? 'PIN 1234-5678' : '',
@@ -374,7 +380,9 @@ describe('international airtime / data / PINs', () => {
     const u = await readyUser();
     const r = (await api().get('/api/services/international/variations?country=GH&operator=5&productType=1').set(tv(u))).body.data;
     expect(r.currency).toBe('GHS');
-    expect(r.variations.map((v) => v.code)).toEqual(['2470', '4987']);
+    expect(r.variations.map((v) => v.code)).toEqual(['2470', '4987', '4988']);
+    // "Fixed" in VTpass but really a range → treated as any-amount.
+    expect(r.variations[2]).toEqual(expect.objectContaining({ fixed: false, rate: 30, min: 160, max: 2000 }));
     expect(r.variations[0]).toEqual(expect.objectContaining({ fixed: true, nairaAmount: 27000 }));
     expect(r.variations[1]).toEqual(expect.objectContaining({ fixed: false, rate: 105, min: 5, max: 500 }));
     expect(await AdminAlert.exists({ title: 'International prices missing' })).toBeNull();
@@ -395,7 +403,28 @@ describe('international airtime / data / PINs', () => {
       serviceID: 'foreign-airtime', billersCode: '233241234567', variation_code: '2470',
       operator_id: '5', country_code: 'GH', product_type_id: '1', email: u.email,
     }));
-    expect(pay.body.amount).toBeUndefined();
+    expect(pay.body.amount).toBe(15);
+  });
+
+  test('range plan marked fixed by VTpass: amount is asked for and sent', async () => {
+    const u = await readyUser({ fund: 30000 });
+    const r = await api().post('/api/services/international').set(tv(u)).send({
+      country: 'GH', productType: '1', operator: '5', variationCode: '4988', phone: '241234567', amount: 200, pin: u.pin,
+    });
+    expect(r.body.data.transaction.status).toBe('success');
+    expect(r.body.data.transaction.amount).toBe(6000);
+    const pay = fake.calls.find((c) => c.path === 'pay');
+    expect(pay.body.amount).toBe(200);
+  });
+
+  test('INVALID ARGUMENTS (011) fails with a clear message', async () => {
+    const bp = require('../src/providers/bill').billProvider();
+    const r = await bp.purchase({
+      service: 'international', requestId: '202610191400DPBAD00001', recipient: '+233241234567', amount: 600000,
+      country: 'GH', productType: '1', operator: '5', variationCode: '4988', fixed: false, email: 'a@b.co', phone: '241234567',
+    });
+    expect(r.status).toBe('failed');
+    expect(r.message).toMatch(/code 011/);
   });
 
   test('flexible top-up: local amount × rate; amount sent to VTpass', async () => {

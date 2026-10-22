@@ -49,11 +49,15 @@ const positive = (v) => (Number(v) > 0 ? Number(v) : null);
  * with no price we can work out is left out — we never sell at a guess.
  */
 function intlVariation(v) {
-  const fixed = String(v.fixedPrice || 'Yes').toLowerCase() === 'yes';
   const rate = positive(v.variation_rate);
   const charged = positive(v.charged_amount);
   const local = positive(v.variation_amount) || 0;
   const range = /(\d[\d,]*(?:\.\d+)?)\s*-\s*(\d[\d,]*(?:\.\d+)?)/.exec(v.name || '');
+  // VTpass marks some top-ups "fixed" although they are a range with no set
+  // amount ("160 -2000 GMD Top Up", variation_amount 0). Those need the
+  // amount the customer chooses, or VTpass answers INVALID ARGUMENTS.
+  const flaggedFixed = String(v.fixedPrice || 'Yes').toLowerCase() === 'yes';
+  const fixed = flaggedFixed && !(local === 0 && range && rate);
   const num = (x) => Number(String(x).replace(/,/g, ''));
   const base = {
     code: String(v.variation_code),
@@ -244,7 +248,26 @@ function createVtpass({
       return result('failed', 'This service is temporarily unavailable.');
     }
     if (PENDING_CODES.has(code) || !code) return result('pending', 'Waiting for the provider to confirm.');
+    if (code === '011') {
+      return result('failed', 'The provider didn\'t accept these payment details (code 011). Your money has been returned — please check the number and plan and try again.');
+    }
     return result('failed', description || `The provider declined this payment (code ${code}).`);
+  }
+
+  /**
+   * Logs why VTpass didn't complete a payment, with the fields we sent
+   * (no keys, phone partly hidden) so problems can be fixed from the log.
+   */
+  function logDecline(serviceID, json, body, fixed) {
+    if (process.env.NODE_ENV === 'test') return;
+    const digits = String(body.billersCode || '');
+    const masked = digits.length > 4 ? `${digits.slice(0, 3)}…${digits.slice(-3)}` : digits;
+    console.warn(
+      `[vtpass] ${serviceID} not completed: code=${json.code ?? '-'} "${json.response_description || ''}"`
+        + ` request_id=${body.request_id} billersCode=${masked} variation=${body.variation_code || '-'}`
+        + ` operator=${body.operator_id || '-'} country=${body.country_code || '-'} type=${body.product_type_id || '-'}`
+        + ` amount=${body.amount ?? '-'} fixed=${fixed} email=${body.email ? 'set' : 'MISSING'}`,
+    );
   }
 
   // ── Bill provider interface ─────────────────────────────
@@ -393,9 +416,13 @@ function createVtpass({
       product_type_id: String(productType),
       email: email || '',
     };
-    if (!fixed && foreignAmount) body.amount = Number(foreignAmount);
+    // Range/"any amount" plans need the amount; for set plans VTpass ignores
+    // it, but sending the plan's own amount does no harm.
+    if (foreignAmount) body.amount = Number(foreignAmount);
     const json = await call('POST', 'pay', body);
-    return interpret(json, { requestId, expectedKobo: amount });
+    const result = await interpret(json, { requestId, expectedKobo: amount });
+    if (result.status !== 'success') logDecline('foreign-airtime', json, body, fixed);
+    return result;
   }
 
   async function purchase(args) {
