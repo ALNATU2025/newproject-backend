@@ -17,6 +17,7 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, required: true, unique: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
     emailVerified: { type: Boolean, default: false },
+    phoneVerified: { type: Boolean, default: false },
 
     // NG or SL. Decides the services, currency and dashboard the user sees.
     // Accounts made before countries existed are Nigerian.

@@ -64,6 +64,16 @@ const env = {
   // provider's API is connected.
   slProvider: safeProvider('SL_PROVIDER'),
 
+  // Sign-up verification: "sms" = 6-digit code by SMS through Firebase
+  // Phone Auth (needs FIREBASE_PROJECT_ID); "email" = 6-digit code by email.
+  firebase: {
+    projectId: clean(process.env.FIREBASE_PROJECT_ID),
+  },
+  signupVerification:
+    clean(process.env.SIGNUP_VERIFICATION).toLowerCase() === 'sms' && clean(process.env.FIREBASE_PROJECT_ID)
+      ? 'sms'
+      : 'email',
+
   // Emails promoted to Super Admin at start-up and when they sign up
   // (for hosts without a shell). Comma-separated.
   superAdminEmails: (process.env.SUPER_ADMIN_EMAILS || '')

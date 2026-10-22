@@ -105,4 +105,24 @@ async function deleteCode(email, purpose) {
   await Otp.deleteOne({ email, purpose });
 }
 
-module.exports = { issueCode, checkCode, markVerified, consumeVerifiedToken, deleteCode };
+/**
+ * Keeps sign-up details while the person proves their phone with an SMS
+ * code sent by Firebase (no email code is sent). Valid for 30 minutes.
+ */
+async function savePending(email, purpose, payload) {
+  const codeHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 4);
+  await Otp.findOneAndUpdate(
+    { email, purpose },
+    { $set: { codeHash, attempts: 0, payload, verifiedToken: null, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } },
+    { upsert: true },
+  );
+}
+
+/** The saved sign-up details, or null when expired / never started. */
+async function pendingPayload(email, purpose) {
+  const otp = await Otp.findOne({ email, purpose });
+  if (!otp || otp.expiresAt < new Date()) return null;
+  return otp.payload || null;
+}
+
+module.exports = { issueCode, checkCode, markVerified, consumeVerifiedToken, deleteCode, savePending, pendingPayload };

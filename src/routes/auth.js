@@ -14,7 +14,8 @@ const { raiseAlert } = require('../services/alerts');
 const { notify } = require('../services/notify');
 const serialize = require('../serializers');
 const { COUNTRY_CODES } = require('../models/constants');
-const { normalizePhone, anyLocal, PHONE_HINT } = require('../utils/phone');
+const { normalizePhone, anyLocal, PHONE_HINT, toE164 } = require('../utils/phone');
+const { verifyIdToken } = require('../services/firebase');
 
 const router = express.Router();
 
@@ -76,12 +77,60 @@ router.post(
       referrerId = String(referrer._id);
     }
     const passwordHash = await bcrypt.hash(password, 10);
-    const extra = await otp.issueCode(email, 'register', { fullName, email, phone, passwordHash, referrerId, country });
-    ok(res, { email, message: `We sent a 6-digit code to ${email}.`, ...extra });
+    const payload = { fullName, email, phone, passwordHash, referrerId, country };
+    if (env.signupVerification === 'sms') {
+      // The app sends the SMS code through Firebase and comes back with
+      // /register/verify-phone.
+      await otp.savePending(email, 'register', payload);
+      return ok(res, {
+        email,
+        verification: 'sms',
+        phoneE164: toE164(phone, country),
+        message: `We'll text a 6-digit code to ${toE164(phone, country)}.`,
+      });
+    }
+    const extra = await otp.issueCode(email, 'register', payload);
+    ok(res, { email, verification: 'email', message: `We sent a 6-digit code to ${email}.`, ...extra });
   }),
 );
 
-/** Step 2: correct code → account created and logged in. */
+/** Creates the account from saved sign-up details and logs in. */
+async function createAccount(p, { phoneVerified = false } = {}) {
+  if (await User.exists({ $or: [{ email: p.email }, { phone: p.phone }] })) {
+    throw conflict('An account with these details already exists. Please log in.', 'ALREADY_REGISTERED');
+  }
+  const user = await User.create({
+    fullName: p.fullName,
+    email: p.email,
+    phone: p.phone,
+    country: p.country === 'SL' ? 'SL' : 'NG',
+    passwordHash: p.passwordHash,
+    // With SMS sign-up the phone is proven instead of the email.
+    emailVerified: !phoneVerified,
+    phoneVerified,
+    referralCode: await uniqueReferralCode(p.fullName),
+    referredBy: p.referrerId || null,
+    isApproved: true,
+    lastLoginAt: new Date(),
+    // Owner accounts listed in SUPER_ADMIN_EMAILS become Super Admin.
+    role: env.superAdminEmails.includes(p.email) ? 'super' : 'user',
+  });
+  await otp.deleteCode(p.email, 'register');
+  await raiseAlert({
+    type: 'new_user',
+    title: 'New user registered',
+    body: `${user.fullName} (${user.email}) just signed up.`,
+    user: user._id,
+  });
+  await notify(user._id, {
+    title: 'Welcome to Dalabapay',
+    body: 'Set up your payment PIN, add money to your wallet and start paying bills in seconds.',
+    kind: 'general',
+  });
+  return user;
+}
+
+/** Step 2 (email): correct code → account created and logged in. */
 router.post(
   '/register/verify',
   validate({ body: z.object({ email: fields.email, code: fields.code }) }),
@@ -90,35 +139,28 @@ router.post(
     const record = await otp.checkCode(email, 'register', code);
     const p = record.payload;
     if (!p) throw badRequest('Please start sign-up again.', 'CODE_EXPIRED');
-    if (await User.exists({ $or: [{ email: p.email }, { phone: p.phone }] })) {
-      throw conflict('An account with these details already exists. Please log in.', 'ALREADY_REGISTERED');
+    const user = await createAccount(p);
+    ok(res, session(user), 201);
+  }),
+);
+
+/**
+ * Step 2 (SMS): the app verified the phone with Firebase (the person typed
+ * the SMS code) and sends the Firebase ID token. The token must be for the
+ * same phone number given at sign-up.
+ */
+router.post(
+  '/register/verify-phone',
+  validate({ body: z.object({ email: fields.email, idToken: z.string().min(20).max(5000) }) }),
+  asyncHandler(async (req, res) => {
+    const { email, idToken } = req.body;
+    const p = await otp.pendingPayload(email, 'register');
+    if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');
+    const claims = await verifyIdToken(idToken);
+    if (claims.phone_number !== toE164(p.phone, p.country)) {
+      throw badRequest('This code was for a different phone number. Please try again.', 'PHONE_MISMATCH');
     }
-    const user = await User.create({
-      fullName: p.fullName,
-      email: p.email,
-      phone: p.phone,
-      country: p.country === 'SL' ? 'SL' : 'NG',
-      passwordHash: p.passwordHash,
-      emailVerified: true,
-      referralCode: await uniqueReferralCode(p.fullName),
-      referredBy: p.referrerId || null,
-      isApproved: true,
-      lastLoginAt: new Date(),
-      // Owner accounts listed in SUPER_ADMIN_EMAILS become Super Admin.
-      role: env.superAdminEmails.includes(p.email) ? 'super' : 'user',
-    });
-    await otp.deleteCode(email, 'register');
-    await raiseAlert({
-      type: 'new_user',
-      title: 'New user registered',
-      body: `${user.fullName} (${user.email}) just signed up.`,
-      user: user._id,
-    });
-    await notify(user._id, {
-      title: 'Welcome to Dalabapay',
-      body: 'Set up your payment PIN, add money to your wallet and start paying bills in seconds.',
-      kind: 'general',
-    });
+    const user = await createAccount(p, { phoneVerified: true });
     ok(res, session(user), 201);
   }),
 );
@@ -127,8 +169,14 @@ router.post(
   '/register/resend',
   validate({ body: z.object({ email: fields.email }) }),
   asyncHandler(async (req, res) => {
+    if (env.signupVerification === 'sms') {
+      // Firebase resends the SMS from the app; nothing to email.
+      const p = await otp.pendingPayload(req.body.email, 'register');
+      if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');
+      return ok(res, { verification: 'sms', phoneE164: toE164(p.phone, p.country) });
+    }
     const extra = await otp.issueCode(req.body.email, 'register');
-    ok(res, { message: 'A new code is on its way.', ...extra });
+    ok(res, { message: 'A new code is on its way.', verification: 'email', ...extra });
   }),
 );
 

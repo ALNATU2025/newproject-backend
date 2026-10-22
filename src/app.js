@@ -35,6 +35,7 @@ function createApp() {
       status: 'ok',
       mode: env.nodeEnv,
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      signupVerification: env.signupVerification === 'sms' ? 'sms (Firebase)' : 'email code',
       email: !isMailConfigured()
         ? 'NOT configured — set RESEND_API_KEY'
         : mailError

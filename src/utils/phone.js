@@ -47,3 +47,11 @@ const PHONE_HINT = {
 };
 
 module.exports = { normalizePhone, anyLocal, PHONE_HINT, NG_PHONE: NG, SL_PHONE: SL };
+
+/** International form for Firebase/SMS: "08031234567" → "+2348031234567". */
+function toE164(local, country) {
+  const d = String(local || '').replace(/^0/, '');
+  return country === 'SL' ? `+232${d}` : `+234${d}`;
+}
+
+module.exports.toE164 = toE164;
