@@ -19,7 +19,8 @@ function assertServiceOpen(service, settings) {
 }
 
 function assertCanTransact(user, settings) {
-  if (settings.requireApproval && !user.isApproved) {
+  // Sierra Leone accounts always wait for an admin's approval.
+  if ((settings.requireApproval || user.country === 'SL') && !user.isApproved) {
     throw forbidden(
       'Your account is under review. Payments unlock once it\'s approved — usually within a few minutes.',
       'ACCOUNT_PENDING_APPROVAL',
@@ -56,6 +57,8 @@ async function usedToday(userId, service) {
 }
 
 async function assertWithinLimits(user, service, amount, settings) {
+  // eslint-disable-next-line global-require
+  await require('./tiers').assertDailyLimit(user, amount, settings);
   const cur = currencyOfService(service);
   const min = settings.minimums && settings.minimums[service];
   if (min && amount < min) {

@@ -52,6 +52,16 @@ transactionSchema.pre('validate', async function setCurrency() {
   this.currency = owner && owner.country === 'SL' ? 'SLE' : 'NGN';
 });
 
+// Admins hear about every new credit and debit (push + webhook).
+transactionSchema.pre('save', function rememberNew() {
+  this.$locals.wasNew = this.isNew;
+});
+transactionSchema.post('save', function tellAdmins(doc) {
+  if (!doc.$locals.wasNew) return;
+  // eslint-disable-next-line global-require
+  setImmediate(() => require('../services/txnEvents').onNewTransaction(doc).catch(() => {}));
+});
+
 transactionSchema.index({ user: 1, createdAt: -1 });
 transactionSchema.index({ createdAt: -1 });
 transactionSchema.index({ user: 1, service: 1, status: 1, createdAt: -1 });

@@ -38,6 +38,8 @@ function createApp() {
   );
   // New dollar cards can carry a photo of the ID document.
   app.use('/api/cards', express.json({ limit: '8mb' }));
+  // Account level upgrades carry document photos.
+  app.use('/api/tiers', express.json({ limit: '12mb' }));
   app.use(express.json({ limit: '200kb' }));
   if (!env.isTest) app.use(morgan(env.isProd ? 'combined' : 'dev'));
 
@@ -60,6 +62,10 @@ function createApp() {
         : mailError
           ? `configured, but the last email FAILED at ${mailError.at}: ${mailError.hint}`
           : 'configured',
+      notifications: {
+        push: env.firebase.serviceAccount ? 'on (Firebase Cloud Messaging)' : 'off — set FIREBASE_SERVICE_ACCOUNT',
+        adminWebhook: env.adminWebhook.url ? `on${env.adminWebhook.secret ? ' (signed)' : ''}` : 'off — set ADMIN_WEBHOOK_URL',
+      },
       cashwyre: {
         keys: env.cashwyre.secretKey && env.cashwyre.businessCode ? 'set' : 'MISSING',
         webhook: env.cashwyre.webhookToken ? 'set' : 'MISSING — set CASHWYRE_WEBHOOK_TOKEN',
@@ -94,6 +100,7 @@ function createApp() {
   app.use('/api/notifications', require('./routes/notifications'));
   app.use('/api/disputes', require('./routes/disputes'));
   app.use('/api/kyc', require('./routes/kyc'));
+  app.use('/api/tiers', require('./routes/tiers'));
   app.use('/api/payouts', require('./routes/payouts'));
   app.use('/api/cards', require('./routes/cards'));
   app.use('/api/webhooks', require('./routes/webhooks'));

@@ -14,6 +14,7 @@ router.get('/me', (req, res) =>
 
 router.use('/dashboard', require('./dashboard'));
 router.use('/users', require('./users'));
+router.use('/kyc', require('./kyc'));
 router.use('/transactions', require('./transactions'));
 router.use('/disputes', require('./disputes'));
 router.use('/payments', require('./payments'));

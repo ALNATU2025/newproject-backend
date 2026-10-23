@@ -55,6 +55,8 @@ async function withdrawCommission(user, amount) {
   }
   if (value > available) throw badRequest('You don\'t have that much in earnings.', 'INSUFFICIENT_EARNINGS');
 
+  // eslint-disable-next-line global-require
+  await require('./tiers').assertCanReceive(user._id, value, settings);
   await wallet.debit(user._id, value, { wallet: 'commission' });
   const { before, after } = await wallet.credit(user._id, value, {
     extraInc: { commissionWithdrawn: value },

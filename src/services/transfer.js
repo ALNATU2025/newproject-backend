@@ -39,6 +39,8 @@ async function executeTransfer({ sender, recipient, amount, note, pin }) {
   assertServiceOpen(service, settings);
   assertCanTransact(sender, settings);
   await assertWithinLimits(sender, service, amount, settings);
+  // eslint-disable-next-line global-require
+  await require('./tiers').assertCanReceive(recipient._id, amount, settings, { who: recipient.fullName });
   await verifyPin(sender._id, pin);
 
   const reference = makeReference('TR');

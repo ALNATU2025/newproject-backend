@@ -51,8 +51,11 @@ async function signUp(overrides = {}) {
 }
 
 /** Signs up, sets a PIN and optionally funds the wallet (₦). */
-async function readyUser({ fund = 0, pin = '135790', role, ...rest } = {}) {
+async function readyUser({ fund = 0, pin = '135790', role, tier = 4, pending = false, ...rest } = {}) {
   const s = await signUp(rest);
+  // Sierra Leone accounts wait for approval; tests get an approved account
+  // (highest level unless [tier] says otherwise) unless [pending].
+  if (rest.country === 'SL' && !pending) await User.updateOne({ _id: s.user.id }, { $set: { isApproved: true, tier } });
   await api().post('/api/auth/pin/set').set(auth(s.token)).send({ pin });
   if (fund > 0) {
     await api().post('/api/dev/simulate-transfer').set(auth(s.token)).send({ amount: fund });

@@ -139,6 +139,32 @@ router.post(
   }),
 );
 
+// Several wrong passwords for one account in a short time look like
+// someone guessing: tell the admins (once per burst).
+const failedLogins = new Map(); // userId → { count, first }
+async function noteFailedLogin(user, ip) {
+  const key = String(user._id);
+  const now = Date.now();
+  const f = failedLogins.get(key);
+  const entry = f && now - f.first < 15 * 60 * 1000 ? { ...f, count: f.count + 1 } : { count: 1, first: now };
+  failedLogins.set(key, entry);
+  if (failedLogins.size > 10000) failedLogins.clear();
+  if (entry.count === 5) {
+    await raiseAlert({
+      type: 'suspicious',
+      severity: 'critical',
+      title: 'Many failed logins',
+      body: `5 wrong passwords for ${user.fullName} (${user.email}) in 15 minutes${ip ? ` from ${ip}` : ''}.`,
+      user: user._id,
+    });
+    await notify(user._id, {
+      title: 'Failed login attempts',
+      body: 'Someone entered the wrong password for your account several times. If this wasn\'t you, change your password.',
+      kind: 'security',
+    });
+  }
+}
+
 /** How a sign-up from [country] is verified: sms | email_link | email. */
 function verificationFor(country) {
   return country === 'SL' ? env.slSignupVerification : env.signupVerification;
@@ -160,21 +186,30 @@ async function createAccount(p, { phoneVerified = false } = {}) {
     phoneVerified,
     referralCode: await uniqueReferralCode(p.fullName),
     referredBy: p.referrerId || null,
-    isApproved: true,
+    // Sierra Leone accounts open at Tier 1 and wait for an admin to
+    // approve them before any money moves.
+    isApproved: p.country !== 'SL',
+    tier: 1,
     lastLoginAt: new Date(),
     // Owner accounts listed in SUPER_ADMIN_EMAILS become Super Admin.
     role: env.superAdminEmails.includes(p.email) ? 'super' : 'user',
   });
   await otp.deleteCode(p.email, 'register');
+  const sl = user.country === 'SL';
   await raiseAlert({
     type: 'new_user',
-    title: 'New user registered',
-    body: `${user.fullName} (${user.email}) just signed up.`,
+    severity: sl ? 'warning' : 'info',
+    title: sl ? 'New Sierra Leone user to approve' : 'New user registered',
+    body: sl
+      ? `${user.fullName} (${user.email}, ${user.phone}) signed up. Review and approve the account in Admin → KYC Review.`
+      : `${user.fullName} (${user.email}) just signed up.`,
     user: user._id,
   });
   await notify(user._id, {
     title: 'Welcome to Dalabapay',
-    body: 'Set up your payment PIN, add money to your wallet and start paying bills in seconds.',
+    body: sl
+      ? 'Your account is being reviewed. You can look around now; payments open as soon as we approve it (Tier 1).'
+      : 'Set up your payment PIN, add money to your wallet and start paying bills in seconds.',
     kind: 'general',
   });
   return user;
@@ -317,7 +352,10 @@ router.post(
       );
     }
     const okPassword = user && (await bcrypt.compare(req.body.password, user.passwordHash));
-    if (!okPassword) throw unauthorized('Incorrect email/phone or password.', 'INVALID_CREDENTIALS');
+    if (!okPassword) {
+      if (user) await noteFailedLogin(user, req.ip);
+      throw unauthorized('Incorrect email/phone or password.', 'INVALID_CREDENTIALS');
+    }
     if (!user.isActive) {
       throw forbidden('Your account has been deactivated. Please contact support.', 'ACCOUNT_DISABLED');
     }

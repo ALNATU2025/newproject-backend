@@ -23,6 +23,8 @@ function user(u, { admin = false } = {}) {
     permissions: u.role === 'user' ? [] : permissionsFor(u.role),
     isActive: u.isActive,
     isApproved: u.isApproved,
+    tier: u.country === 'SL' ? Math.min(4, Math.max(1, Number(u.tier) || 1)) : null,
+    approvalNote: u.approvalNote || null,
     emailVerified: u.emailVerified,
     pinSet: Boolean(u.pinSet),
     pinLocked: Boolean(u.pinLockedUntil && new Date(u.pinLockedUntil) > new Date()),

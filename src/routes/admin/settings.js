@@ -45,6 +45,11 @@ function publicSettings(s) {
       minFirstDeposit: toNaira(s.slReferral.minFirstDeposit),
     },
     cashwyre: s.cashwyre,
+    // Sierra Leone account levels (Leones; null = no limit)
+    slTiers: Object.fromEntries(
+      Object.entries(s.slTiers || {}).map(([t, v]) => [t, { daily: nairaOrNull(v.daily), maxBalance: nairaOrNull(v.maxBalance) }]),
+    ),
+    adminNotify: s.adminNotify,
     slFunding: {
       minAmount: toNaira(s.slFunding.minAmount),
       maxAmount: toNaira(s.slFunding.maxAmount),
@@ -89,6 +94,16 @@ router.patch(
           minFirstDeposit: z.coerce.number().min(0).optional(),
         })
         .optional(),
+      slTiers: z
+        .record(
+          z.enum(['1', '2', '3', '4']),
+          z.object({
+            daily: z.coerce.number().min(0).nullable().optional(),
+            maxBalance: z.coerce.number().min(0).nullable().optional(),
+          }),
+        )
+        .optional(),
+      adminNotify: z.object({ transactions: z.boolean().optional() }).optional(),
       cashwyre: z
         .object({
           payoutFeePercent: z.coerce.number().min(0).max(50).optional(),
@@ -135,6 +150,15 @@ router.patch(
       patch[key] = {};
       for (const [k, v] of Object.entries(b[key])) if (v !== undefined) patch[key][k] = toKobo(v);
     }
+    if (b.slTiers) {
+      patch.slTiers = {};
+      for (const [t, v] of Object.entries(b.slTiers)) {
+        patch.slTiers[t] = {};
+        if (v.daily !== undefined) patch.slTiers[t].daily = koboOrNull(v.daily);
+        if (v.maxBalance !== undefined) patch.slTiers[t].maxBalance = koboOrNull(v.maxBalance);
+      }
+    }
+    if (b.adminNotify) patch.adminNotify = b.adminNotify;
     if (b.cashwyre) {
       patch.cashwyre = Object.fromEntries(Object.entries(b.cashwyre).filter(([, v]) => v !== undefined));
     }

@@ -134,9 +134,38 @@ router.post(
   asyncHandler(async (req, res) => {
     const u = await loadUser(req.params.id);
     u.isApproved = true;
+    u.approvalNote = null;
+    if (u.country === 'SL' && !u.tier) u.tier = 1;
     await u.save();
     await audit(req.user._id, 'user.approve', { targetUser: u._id });
-    await notify(u._id, { title: 'Account approved', body: 'Your account is approved. You can now make payments.', kind: 'security' });
+    await notify(u._id, {
+      title: 'Account approved',
+      body: u.country === 'SL'
+        ? 'Your account is approved at Tier 1. You can now make payments. Upgrade your account level for higher limits.'
+        : 'Your account is approved. You can now make payments.',
+      kind: 'security',
+    });
+    ok(res, serialize.user(u, { admin: true }));
+  }),
+);
+
+/** Turn down a new account (it stays unable to transact). */
+router.post(
+  '/:id/reject',
+  requirePermission('users:approve'),
+  idParam,
+  validate({ body: z.object({ reason: z.string().trim().min(3, 'Give a reason').max(300) }) }),
+  asyncHandler(async (req, res) => {
+    const u = await loadUser(req.params.id);
+    u.isApproved = false;
+    u.approvalNote = req.body.reason;
+    await u.save();
+    await audit(req.user._id, 'user.reject', { targetUser: u._id, details: { reason: req.body.reason } });
+    await notify(u._id, {
+      title: 'Account not approved',
+      body: `We couldn't approve your account: ${req.body.reason}. Contact support if you think this is a mistake.`,
+      kind: 'security',
+    });
     ok(res, serialize.user(u, { admin: true }));
   }),
 );

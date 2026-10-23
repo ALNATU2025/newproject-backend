@@ -1,5 +1,6 @@
 // Wallet: balance, adding money, sending money, checking a transfer.
 const express = require('express');
+const { assertCanReceive } = require('../services/tiers');
 const { Transaction } = require('../models');
 const { requireAuth } = require('../middleware/auth');
 const { validate, z, fields } = require('../middleware/validate');
@@ -180,6 +181,7 @@ router.post(
     }
     const method = (f.methods || []).find((m) => m.id === req.body.method && m.account);
     if (!method) throw badRequest('Choose how you paid.', 'INVALID_METHOD');
+    await assertCanReceive(req.user, amount, await getSettings());
     const duplicate = await Transaction.exists({
       type: 'wallet_funding',
       'metadata.method': method.id,

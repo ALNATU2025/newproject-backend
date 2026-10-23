@@ -23,6 +23,14 @@ const userSchema = new mongoose.Schema(
     // Accounts made before countries existed are Nigerian.
     country: { type: String, enum: COUNTRY_CODES, default: 'NG', index: true },
 
+    // Sierra Leone account level (1–4): sets the daily limit and maximum
+    // balance. Raised by an admin after reviewing the customer's documents.
+    tier: { type: Number, min: 1, max: 4, default: 1 },
+    // Why an admin turned the account down (sign-up review).
+    approvalNote: { type: String, default: null },
+    // Count of limit blocks per day (to spot probing).
+    tierBlocks: { type: mongoose.Schema.Types.Mixed, default: {} },
+
     role: { type: String, enum: ROLES, default: 'user', index: true },
     isActive: { type: Boolean, default: true },
     isApproved: { type: Boolean, default: true },

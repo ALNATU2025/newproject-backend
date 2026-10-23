@@ -88,6 +88,8 @@ router.post(
         { ordered: false },
       );
     }
+    // eslint-disable-next-line global-require
+    require('../../services/push').pushToUsers(ids, { title, body: message, data: { kind, broadcastId: String(broadcast._id) } }).catch(() => {});
     await audit(req.user._id, 'notification.broadcast', { details: { title, audience, recipients: ids.length } });
     ok(res, { sent: ids.length, broadcastId: String(broadcast._id) }, 201);
   }),

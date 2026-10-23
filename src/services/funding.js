@@ -32,6 +32,9 @@ async function creditDeposit({
   const settings = await getSettings();
   const fee = chargeFee ? percentOf(amount, settings.fundingFeePercent) : 0;
   const net = amount - fee;
+  // Sierra Leone wallets have a maximum balance per account level.
+  // eslint-disable-next-line global-require
+  await require('./tiers').assertCanReceive(userId, net, settings, { who: 'your' });
 
   let txn = null;
   if (pendingTxn) {

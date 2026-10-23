@@ -90,6 +90,31 @@ const env = {
   // backup when FIREBASE_PROJECT_ID is set.
   firebase: {
     projectId: clean(process.env.FIREBASE_PROJECT_ID),
+    // Push notifications: the service account JSON from Firebase console →
+    // Project settings → Service accounts → Generate new private key.
+    // Paste the whole JSON (or it base64-encoded).
+    serviceAccount: (() => {
+      const raw = clean(process.env.FIREBASE_SERVICE_ACCOUNT);
+      if (!raw) return null;
+      try {
+        const text = raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
+        const j = JSON.parse(text);
+        if (!j.client_email || !j.private_key) throw new Error('missing client_email / private_key');
+        return { projectId: j.project_id, clientEmail: j.client_email, privateKey: j.private_key.replace(/\\n/g, '\n') };
+      } catch (e) {
+        startupWarnings.push(`FIREBASE_SERVICE_ACCOUNT is not valid JSON (${e.message}); push notifications are off.`);
+        return null;
+      }
+    })(),
+  },
+
+  // Admin notifications to another system (Slack, Discord, Zapier, Make,
+  // your own server…): every admin alert, new sign-up, transaction and
+  // suspicious activity is POSTed as JSON. With ADMIN_WEBHOOK_SECRET the
+  // body is signed: header X-Dalabapay-Signature = sha256=<HMAC hex>.
+  adminWebhook: {
+    url: clean(process.env.ADMIN_WEBHOOK_URL),
+    secret: clean(process.env.ADMIN_WEBHOOK_SECRET),
   },
   twilio: {
     accountSid: clean(process.env.TWILIO_ACCOUNT_SID),

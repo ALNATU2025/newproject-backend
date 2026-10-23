@@ -94,7 +94,7 @@ const DISPUTE_TYPES = [
   'other',
 ];
 
-const ALERT_TYPES = ['new_user', 'wallet', 'duplicate', 'suspicious', 'status', 'dispute', 'provider'];
+const ALERT_TYPES = ['new_user', 'wallet', 'duplicate', 'suspicious', 'status', 'dispute', 'provider', 'kyc'];
 
 module.exports = {
   ROLES,

@@ -150,7 +150,49 @@ const Card = mongoose.model(
   ),
 );
 
+/**
+ * A Sierra Leone customer's request to move up an account level, with the
+ * documents for an admin to review. Images are kept as base64 and only
+ * loaded when an admin opens the request.
+ */
+const KycRequest = mongoose.model(
+  'KycRequest',
+  new Schema(
+    {
+      user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+      tier: { type: Number, enum: [2, 3, 4], required: true },
+      status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
+      details: { type: Schema.Types.Mixed, default: {} },
+      files: {
+        type: [{ _id: false, label: String, mime: String, data: String }],
+        default: [],
+        select: false,
+      },
+      reviewedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+      reviewedAt: { type: Date, default: null },
+      rejectionReason: { type: String, default: null },
+    },
+    { timestamps: true },
+  ),
+);
+
+/** A phone that receives push notifications (Firebase Cloud Messaging). */
+const Device = mongoose.model(
+  'Device',
+  new Schema(
+    {
+      user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+      token: { type: String, required: true, unique: true },
+      platform: { type: String, default: 'android' },
+      lastSeenAt: { type: Date, default: Date.now },
+    },
+    { timestamps: true },
+  ),
+);
+
 module.exports = {
+  KycRequest,
+  Device,
   Card,
   User,
   Transaction,

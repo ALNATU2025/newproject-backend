@@ -415,6 +415,8 @@ async function withdraw(user, id, { amountUsd: raw, pin }) {
     throw conflict('Your last withdrawal from this card is still processing.', 'WITHDRAWAL_PENDING');
   }
   const p = await price(user, 'withdraw', amountUsd, settings);
+  // eslint-disable-next-line global-require
+  await require('./tiers').assertCanReceive(user._id, p.local, settings);
   const reference = makeReference('VW');
   const txn = await Transaction.create({
     user: user._id,
