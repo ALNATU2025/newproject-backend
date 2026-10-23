@@ -71,7 +71,7 @@ async function safeCount(country, type) {
  * Countries money can be sent to, each with whether bank accounts and/or
  * mobile money wallets are supported (checked with Cashwyre's bank list).
  */
-async function payoutCountries({ fresh = false } = {}) {
+async function baseCountries({ fresh = false } = {}) {
   if (!fresh && countryCache && Date.now() - countryCachedAt < COUNTRY_TTL) return countryCache;
   let list;
   try {
@@ -108,13 +108,31 @@ async function payoutCountries({ fresh = false } = {}) {
   return usable;
 }
 
+/**
+ * Countries money can be sent to, with what they support and whether the
+ * wallet that pays transfers there has money (available: null = unknown).
+ */
+async function payoutCountries(opts) {
+  const list = await baseCountries(opts);
+  const currencies = [...new Set(list.map((c) => c.currency))];
+  const balances = Object.fromEntries(
+    await Promise.all(currencies.map(async (cur) => [cur, await businessBalance(debitWalletFor(cur, 'SLE') || cur)])),
+  );
+  return list.map((c) => {
+    const b = balances[c.currency];
+    return { ...c, wallet: debitWalletFor(c.currency, 'SLE') || c.currency, available: b === null || b === undefined ? null : b > 0 };
+  });
+}
+
 function clearPayoutCache() {
   countryCache = null;
   bankCache.clear();
+  balanceCache.clear();
+  lowAlertAt.clear();
 }
 
 async function findCountry(code) {
-  const c = (await payoutCountries()).find((x) => x.code === code);
+  const c = (await baseCountries()).find((x) => x.code === code);
   if (!c) throw badRequest('Money can\'t be sent to this country.', 'COUNTRY_NOT_SUPPORTED');
   return c;
 }
@@ -125,6 +143,57 @@ async function findBank(country, type, bankCode) {
     throw badRequest(type === 'bank' ? 'Choose a valid bank.' : 'Choose a valid mobile money provider.', 'INVALID_BANK');
   }
   return bank;
+}
+
+// ── Which business wallet pays, and is there enough in it ──
+
+/**
+ * Wallet Cashwyre should debit ('' = the wallet in the transfer's own
+ * currency). Each country's transfers come from that country's wallet
+ * unless CASHWYRE_CROSS_BORDER_WALLET names one wallet for all.
+ */
+function debitWalletFor(destCurrency, senderCurrency) {
+  if (destCurrency === senderCurrency) return '';
+  return env.cashwyre.crossBorderWallet || '';
+}
+
+const BALANCE_TTL = 30 * 1000;
+const balanceCache = new Map();
+const lowAlertAt = new Map();
+
+/** Balance of a business wallet, or null when Cashwyre can't say. */
+async function businessBalance(currency, { fresh = false } = {}) {
+  const hit = balanceCache.get(currency);
+  if (!fresh && hit && Date.now() - hit.at < BALANCE_TTL) return hit.value;
+  let value = null;
+  try {
+    value = await cashwyre.walletBalance(currency);
+  } catch {
+    value = null; // unknown: let Cashwyre decide
+  }
+  balanceCache.set(currency, { at: Date.now(), value });
+  return value;
+}
+
+/**
+ * Refuses (before any money moves) when the wallet that pays this transfer
+ * is known to be too low, and tells the admins to fund it.
+ */
+async function assertBusinessFunds(dest, walletCurrency, needed) {
+  if (!(needed > 0)) return;
+  const balance = await businessBalance(walletCurrency, { fresh: true });
+  if (balance === null || balance >= needed) return;
+  const last = lowAlertAt.get(walletCurrency) || 0;
+  if (Date.now() - last > 30 * 60 * 1000) {
+    lowAlertAt.set(walletCurrency, Date.now());
+    await raiseAlert({
+      type: 'provider',
+      severity: 'critical',
+      title: `Fund your Cashwyre ${walletCurrency} wallet`,
+      body: `A transfer to ${dest.name} needed ${walletCurrency} ${needed.toFixed(2)} but the wallet has ${walletCurrency} ${balance.toFixed(2)}. Transfers to ${dest.name} are paused until it's funded.`,
+    });
+  }
+  throw unavailable(`Transfers to ${dest.name} aren't available right now. Please try again later.`, 'PAYOUT_WALLET_LOW');
 }
 
 // ── Pricing ────────────────────────────────────────────────
@@ -158,6 +227,13 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
   const fee = await cashwyre.payoutFee({ currency: dest.currency, amount, accountNumber });
 
   const userCur = currencyOf(user.country);
+  const debitWallet = debitWalletFor(dest.currency, userCur);
+  const walletCurrency = debitWallet || dest.currency;
+  // What leaves that wallet: the amount plus Cashwyre's fee.
+  const needed = walletCurrency === dest.currency
+    ? fee.totalDebitLocal > 0 ? fee.totalDebitLocal : amount + fee.feeLocal
+    : walletCurrency === 'USD' ? fee.totalDebitUsd : 0;
+  await assertBusinessFunds(dest, walletCurrency, needed);
   const pricing = settings.cashwyre || {};
   let base; // in the sender's currency (major units)
   let rate = null; // sender's currency per 1 unit of the recipient's
@@ -185,6 +261,9 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
     narration: narration || null,
     amount,
     charge,
+    debitWallet,
+    walletCurrency,
+    needed,
     chargeCurrency: userCur,
     rate,
   };
@@ -215,6 +294,7 @@ function readQuote(user, token) {
 async function send(user, { quoteToken, pin }) {
   const q = readQuote(user, quoteToken);
   await checks(user, q.charge);
+  await assertBusinessFunds({ name: q.countryName }, q.walletCurrency || q.currency, q.needed);
   await verifyPin(user._id, pin);
 
   const service = serviceFor(user);
@@ -280,7 +360,7 @@ async function send(user, { quoteToken, pin }) {
       country: q.country,
       amount: q.amount,
       narration: (q.narration || `Dalabapay transfer ${reference}`).slice(0, 100),
-      debitWalletCurrency: q.currency === cur ? '' : env.cashwyre.crossBorderWallet,
+      debitWalletCurrency: q.debitWallet !== undefined ? q.debitWallet : debitWalletFor(q.currency, cur),
     });
     txn.providerReference = r.transactionReference;
     await txn.save();

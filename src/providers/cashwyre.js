@@ -164,6 +164,16 @@ async function payoutStatus({ reference, transactionReference }) {
   };
 }
 
+// ── Your business wallets ──────────────────────────────────
+
+/** Available balance of your Cashwyre wallet in [currency] (major units). */
+async function walletBalance(currency) {
+  const d = await call('Wallet/getFundwalletAccountInfo', { currency });
+  const v = Number(pick(d, 'availableBalance'));
+  if (!Number.isFinite(v)) throw new AppError(400, `No ${currency} wallet`, 'PROVIDER_DECLINED');
+  return v;
+}
+
 // ── Exchange rates ─────────────────────────────────────────
 
 /** { NGN: { buy, sell }, ... } — $1 in each currency. */
@@ -275,6 +285,7 @@ module.exports = {
   payoutStatus,
   payoutState,
   fxRates,
+  walletBalance,
   createCard,
   getCard,
   cardFrom,

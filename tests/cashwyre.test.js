@@ -13,6 +13,8 @@ useDatabase('cashwyre');
 const HOOK = 'hook-secret-1234567890';
 const calls = [];
 const statuses = {}; // payout reference → status
+// Your Cashwyre business wallets (major units). XOF has none.
+const bizWallets = { SLE: 100000, GHS: 5000, NGN: 1000000, USD: 500 };
 const cardsByEmail = {}; // email → [card]
 let txn = 0;
 
@@ -96,6 +98,9 @@ async function fakeCashwyre(url, opts) {
     }
     case 'CustomerCard/getCardTransactions':
       return reply({ Success: true, Message: 'Result successful', CardTransactions: cardByCode(b.cardCode).history });
+    case 'Wallet/getFundwalletAccountInfo':
+      if (bizWallets[b.currency] === undefined) return reply({ success: false, message: 'Wallet not found' }, 400);
+      return okData({ currency: b.currency, availableBalance: bizWallets[b.currency] });
     case 'customerCard/freezeCard':
     case 'customerCard/unfreezeCard':
       return okData(true);
@@ -158,7 +163,9 @@ describe('transfers', () => {
     expect(s.status).toBe(201);
     expect(s.body.data.transaction).toEqual(expect.objectContaining({ type: 'payout', status: 'pending', amount: 185.44, currency: 'SLE' }));
     const init = calls.find((c) => c.path === 'Payout/initiate').body;
-    expect(init).toEqual(expect.objectContaining({ BankCode: 'MTN_GH', Amount: 100, Currency: 'GHS', Country: 'GH', DebitWalletCurrency: 'USD' }));
+    expect(init).toEqual(expect.objectContaining({ BankCode: 'MTN_GH', Amount: 100, Currency: 'GHS', Country: 'GH' }));
+    // Paid from your GHS wallet (each country from its own wallet).
+    expect(init.DebitWalletCurrency).toBeUndefined();
     expect((await balanceOf(u.token)).balance).toBeCloseTo(2000 - 185.44, 2);
 
     // A webhook alone isn't trusted: Cashwyre still says "processing".
@@ -218,6 +225,49 @@ describe('transfers', () => {
     });
     expect(r.status).toBe(400);
     expect(r.body.code).toBe('METHOD_NOT_SUPPORTED');
+  });
+
+  test('a country\'s wallet too low: refused before any money moves, admins told to fund it', async () => {
+    const { AdminAlert } = require('../src/models');
+    bizWallets.GHS = 50; // the transfer needs GHS 103
+    try {
+      const u = await user('SL', 2000);
+      const list = await api().get('/api/payouts/countries').set(auth(u.token));
+      const gh = list.body.data.countries.find((c) => c.code === 'GH');
+      expect(gh).toEqual(expect.objectContaining({ wallet: 'GHS', available: true }));
+      const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
+        country: 'GH', accountType: 'bank', bankCode: 'GCB', accountNumber: '1234567890', accountName: 'Ama Owusu', amount: 100,
+      });
+      expect(q.status).toBe(503);
+      expect(q.body.code).toBe('PAYOUT_WALLET_LOW');
+      expect(q.body.message).toMatch(/Transfers to GH aren't available right now/);
+      expect(await AdminAlert.exists({ title: 'Fund your Cashwyre GHS wallet' })).toBeTruthy();
+      expect((await balanceOf(u.token)).balance).toBeCloseTo(2000, 2);
+      expect(calls.some((c) => c.path === 'Payout/initiate')).toBe(false);
+
+      bizWallets.GHS = 0;
+      clearPayoutCache();
+      const again = await api().get('/api/payouts/countries').set(auth(u.token));
+      expect(again.body.data.countries.find((c) => c.code === 'GH').available).toBe(false);
+    } finally {
+      bizWallets.GHS = 5000;
+    }
+  });
+
+  test('CASHWYRE_CROSS_BORDER_WALLET=USD pays every cross-border transfer from USD', async () => {
+    env.cashwyre.crossBorderWallet = 'USD';
+    try {
+      const u = await user('SL', 2000);
+      const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
+        country: 'GH', accountType: 'bank', bankCode: 'GCB', accountNumber: '1234567899', accountName: 'Ama Owusu', amount: 100,
+      });
+      expect(q.status).toBe(200);
+      await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
+      const init = calls.find((c) => c.path === 'Payout/initiate').body;
+      expect(init.DebitWalletCurrency).toBe('USD');
+    } finally {
+      env.cashwyre.crossBorderWallet = '';
+    }
   });
 
   test('webhook with the wrong secret is ignored', async () => {
