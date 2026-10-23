@@ -145,8 +145,6 @@ router.get(
   '/sl-funding',
   asyncHandler(async (req, res) => {
     if (!isSl(req)) throw forbidden('This is for Sierra Leone accounts.', 'WRONG_COUNTRY');
-    // Pending accounts can't transact, top-ups included.
-    assertCanTransact(req.user, await getSettings());
     const f = (await getSettings()).slFunding;
     ok(res, {
       currency: 'SLE',
@@ -176,6 +174,8 @@ router.post(
   }),
   asyncHandler(async (req, res) => {
     if (!isSl(req)) throw forbidden('This is for Sierra Leone accounts.', 'WRONG_COUNTRY');
+    // Pending accounts can't transact, top-ups included.
+    assertCanTransact(req.user, await getSettings());
     const f = (await getSettings()).slFunding;
     const amount = toKobo(req.body.amount);
     if (amount < f.minAmount || amount > f.maxAmount) {
