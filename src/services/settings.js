@@ -114,13 +114,13 @@ const DEFAULTS = {
     instructions: 'Send the money, then tap "I\'ve paid" with the transaction ID. We credit your wallet as soon as we confirm it.',
   },
 
-  // Sierra Leone account levels (Leones, cents). Tier 4 has no amounts in
-  // the brief yet: set them in Admin → Settings.
+  // Sierra Leone account levels (Leones, cents; null = no limit). Tier 4
+  // (business licence) has no limits. Editable in Admin → Settings.
   slTiers: {
     1: { daily: 100 * LEONE, maxBalance: 500 * LEONE },
     2: { daily: 1_000 * LEONE, maxBalance: 5_000 * LEONE },
     3: { daily: 5_000 * LEONE, maxBalance: 10_000 * LEONE },
-    4: { daily: 50_000 * LEONE, maxBalance: 100_000 * LEONE },
+    4: { daily: null, maxBalance: null },
   },
 
   // What admins hear about by push and webhook (alerts always go out).

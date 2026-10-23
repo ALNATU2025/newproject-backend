@@ -66,7 +66,7 @@ describe('tier limits', () => {
     expect(over.body.message).toMatch(/Le 40\.00/);
     const info = (await api().get('/api/tiers').set(auth(u.token))).body.data;
     expect(info).toEqual(expect.objectContaining({ tier: 1, spentToday: 60, leftToday: 40 }));
-    expect(info.tiers.map((t) => [t.tier, t.daily, t.maxBalance])).toEqual([[1, 100, 500], [2, 1000, 5000], [3, 5000, 10000], [4, 50000, 100000]]);
+    expect(info.tiers.map((t) => [t.tier, t.daily, t.maxBalance])).toEqual([[1, 100, 500], [2, 1000, 5000], [3, 5000, 10000], [4, null, null]]);
   });
 
   test('Tier 1: the wallet holds at most Le 500 (top-ups and transfers in)', async () => {
