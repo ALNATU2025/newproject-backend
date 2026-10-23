@@ -17,6 +17,19 @@ function clean(v) {
   return String(v || '').trim().replace(/^(['"])(.*)\1$/, '$2').trim();
 }
 
+/** A sign-up method that is actually usable with the settings given. */
+function signupMethod(value, fallback) {
+  const v = clean(value).toLowerCase();
+  const firebase = Boolean(clean(process.env.FIREBASE_PROJECT_ID));
+  const twilio = Boolean(
+    clean(process.env.TWILIO_ACCOUNT_SID) && clean(process.env.TWILIO_AUTH_TOKEN) && clean(process.env.TWILIO_VERIFY_SERVICE_SID),
+  );
+  if (v === 'twilio' && twilio) return 'twilio';
+  if ((v === 'sms' || v === 'email_link') && firebase) return v;
+  if (v === 'email') return 'email';
+  return fallback;
+}
+
 function safeProvider(name) {
   const v = (process.env[name] || (isProd ? 'none' : 'simulator')).toLowerCase();
   if (isProd && v === 'simulator' && process.env.ALLOW_SIMULATOR_IN_PRODUCTION !== 'true') {
@@ -64,26 +77,27 @@ const env = {
   // provider's API is connected.
   slProvider: safeProvider('SL_PROVIDER'),
 
-  // Sign-up verification: "sms" = 6-digit code by SMS through Firebase
-  // Phone Auth (needs FIREBASE_PROJECT_ID); "email" = 6-digit code by email.
+  // Sign-up verification (SIGNUP_VERIFICATION, per country with
+  // SL_SIGNUP_VERIFICATION):
+  //   twilio     6-digit SMS code sent and checked by Twilio Verify (server)
+  //   email_link Firebase emails a verification link
+  //   sms        6-digit SMS code by Firebase Phone Auth (in the app)
+  //   email      6-digit email code (Resend/SMTP)
+  // With Twilio, "Verify by email instead" (Firebase link) is offered as a
+  // backup when FIREBASE_PROJECT_ID is set.
   firebase: {
     projectId: clean(process.env.FIREBASE_PROJECT_ID),
   },
-  signupVerification:
-    clean(process.env.SIGNUP_VERIFICATION).toLowerCase() === 'sms' && clean(process.env.FIREBASE_PROJECT_ID)
-      ? 'sms'
-      : 'email',
-  // Sierra Leone sign-ups: "email_link" = Firebase emails a verification
-  // link (Firebase's SMS doesn't reach SL networks); "sms" = as Nigeria;
-  // "email" = 6-digit email code (Resend/SMTP). Default: email_link when
-  // Firebase is set up, otherwise email.
-  slSignupVerification: (() => {
-    const v = clean(process.env.SL_SIGNUP_VERIFICATION).toLowerCase();
-    const firebase = Boolean(clean(process.env.FIREBASE_PROJECT_ID));
-    if ((v === 'sms' || v === 'email_link') && firebase) return v;
-    if (v === 'email') return 'email';
-    return firebase ? 'email_link' : 'email';
-  })(),
+  twilio: {
+    accountSid: clean(process.env.TWILIO_ACCOUNT_SID),
+    authToken: clean(process.env.TWILIO_AUTH_TOKEN),
+    verifyServiceSid: clean(process.env.TWILIO_VERIFY_SERVICE_SID),
+  },
+  signupVerification: signupMethod(process.env.SIGNUP_VERIFICATION, 'email'),
+  slSignupVerification: signupMethod(
+    process.env.SL_SIGNUP_VERIFICATION || process.env.SIGNUP_VERIFICATION,
+    clean(process.env.FIREBASE_PROJECT_ID) ? 'email_link' : 'email',
+  ),
 
   // Emails promoted to Super Admin at start-up and when they sign up
   // (for hosts without a shell). Comma-separated.

@@ -16,6 +16,7 @@ const serialize = require('../serializers');
 const { COUNTRY_CODES, COUNTRIES } = require('../models/constants');
 const { normalizePhone, anyLocal, PHONE_HINT, toE164 } = require('../utils/phone');
 const { verifyIdToken } = require('../services/firebase');
+const twilio = require('../services/twilioVerify');
 
 const router = express.Router();
 
@@ -79,6 +80,27 @@ router.post(
     const passwordHash = await bcrypt.hash(password, 10);
     const payload = { fullName, email, phone, passwordHash, referrerId, country };
     const method = verificationFor(country);
+    if (method === 'twilio') {
+      // Our server texts the code (Twilio Verify); the app shows the code
+      // boxes and comes back with /register/verify-sms.
+      await otp.savePending(email, 'register', payload);
+      let smsError = null;
+      try {
+        await twilio.sendCode(toE164(phone, country));
+      } catch (e) {
+        // Don't block sign-up: the app shows why and offers the email link.
+        if (!env.firebase.projectId) throw e;
+        smsError = e.message;
+      }
+      return ok(res, {
+        email,
+        verification: 'sms_code',
+        phoneE164: toE164(phone, country),
+        emailBackup: Boolean(env.firebase.projectId),
+        smsError,
+        message: smsError || `We texted a 6-digit code to ${toE164(phone, country)}.`,
+      });
+    }
     if (method === 'email_link') {
       // The app has Firebase email the verification link and comes back
       // with /register/verify-email-link once it's been tapped.
@@ -160,6 +182,38 @@ router.post(
   }),
 );
 
+/** Step 2 (SMS by our server, Twilio Verify): the code from the SMS. */
+router.post(
+  '/register/verify-sms',
+  validate({ body: z.object({ email: fields.email, code: fields.code }) }),
+  asyncHandler(async (req, res) => {
+    const { email, code } = req.body;
+    const p = await otp.pendingPayload(email, 'register');
+    if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');
+    const approved = await twilio.checkCode(toE164(p.phone, p.country), code);
+    if (!approved) throw badRequest('Incorrect code. Please check the SMS and try again.', 'CODE_INVALID');
+    const user = await createAccount(p, { phoneVerified: true });
+    ok(res, session(user), 201);
+  }),
+);
+
+/**
+ * Backup when the SMS doesn't arrive: switch this sign-up to the Firebase
+ * email link (the app sends it, then calls /register/verify-email-link).
+ */
+router.post(
+  '/register/use-email',
+  validate({ body: z.object({ email: fields.email }) }),
+  asyncHandler(async (req, res) => {
+    if (!env.firebase.projectId) {
+      throw badRequest('Email verification isn\'t available. Please use the SMS code.', 'EMAIL_BACKUP_UNAVAILABLE');
+    }
+    const p = await otp.pendingPayload(req.body.email, 'register');
+    if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');
+    ok(res, { email: p.email, verification: 'email_link' });
+  }),
+);
+
 /**
  * Step 2 (email link): Firebase emailed a verification link, the person
  * tapped it, and the app sends the Firebase ID token. The token must be for
@@ -211,6 +265,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const p = await otp.pendingPayload(req.body.email, 'register');
     const method = p ? verificationFor(p.country) : 'email';
+    if (method === 'twilio') {
+      await twilio.sendCode(toE164(p.phone, p.country));
+      return ok(res, { message: 'A new code is on its way.', verification: 'sms_code', phoneE164: toE164(p.phone, p.country) });
+    }
     if (method !== 'email') {
       // Firebase resends the SMS / email link from the app.
       if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');

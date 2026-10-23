@@ -4,6 +4,13 @@ const cors = require('cors');
 const morgan = require('morgan');
 const mongoose = require('mongoose');
 const env = require('./config/env');
+
+const VERIFY_LABEL = {
+  twilio: 'sms code (Twilio)',
+  email_link: 'email link (Firebase)',
+  sms: 'sms (Firebase)',
+  email: 'email code',
+};
 const { notFoundHandler, errorHandler } = require('./middleware/error');
 
 function createApp() {
@@ -41,8 +48,9 @@ function createApp() {
       mode: env.nodeEnv,
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
       signupVerification: {
-        nigeria: env.signupVerification === 'sms' ? 'sms (Firebase)' : 'email code',
-        sierraLeone: { email_link: 'email link (Firebase)', sms: 'sms (Firebase)', email: 'email code' }[env.slSignupVerification],
+        nigeria: VERIFY_LABEL[env.signupVerification],
+        sierraLeone: VERIFY_LABEL[env.slSignupVerification],
+        emailBackup: env.firebase.projectId ? 'Firebase email link' : 'off',
       },
       email: !isMailConfigured()
         ? 'NOT configured — set RESEND_API_KEY'
