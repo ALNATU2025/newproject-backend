@@ -127,7 +127,7 @@ const hook = (eventType, eventData, token = HOOK) => api().post(`/api/webhooks/c
 
 describe('countries and banks', () => {
   test('lists where money can go and whether mobile money works there', async () => {
-    const u = await user('NG', 0);
+    const u = await user('SL', 0);
     const r = await api().get('/api/payouts/countries').set(auth(u.token));
     expect(r.status).toBe(200);
     const byCode = Object.fromEntries(r.body.data.countries.map((c) => [c.code, c]));
@@ -144,22 +144,22 @@ describe('countries and banks', () => {
 });
 
 describe('transfers', () => {
-  test('Nigeria → Ghana mobile money: priced in Naira, settled by webhook after checking', async () => {
-    const u = await user('NG', 100000);
+  test('Sierra Leone → Ghana mobile money: priced in Leones, settled by webhook after checking', async () => {
+    const u = await user('SL', 2000);
     const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
       country: 'GH', accountType: 'mobile_money', bankCode: 'MTN_GH', accountNumber: '0241234567', accountName: 'Kwame Mensah', amount: 100,
     });
     expect(q.status).toBe(200);
-    // $7.50 × ₦1600 × 1.02 (FX margin) × 1.01 (fee)
-    expect(q.body.data.charge).toBeCloseTo(12362.4, 2);
+    // $7.50 × Le 24 × 1.02 (FX margin) × 1.01 (fee)
+    expect(q.body.data.charge).toBeCloseTo(185.44, 2);
     expect(q.body.data.currency).toBe('GHS');
 
     const s = await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
     expect(s.status).toBe(201);
-    expect(s.body.data.transaction).toEqual(expect.objectContaining({ type: 'payout', status: 'pending', amount: 12362.4, currency: 'NGN' }));
+    expect(s.body.data.transaction).toEqual(expect.objectContaining({ type: 'payout', status: 'pending', amount: 185.44, currency: 'SLE' }));
     const init = calls.find((c) => c.path === 'Payout/initiate').body;
     expect(init).toEqual(expect.objectContaining({ BankCode: 'MTN_GH', Amount: 100, Currency: 'GHS', Country: 'GH', DebitWalletCurrency: 'USD' }));
-    expect((await balanceOf(u.token)).balance).toBeCloseTo(100000 - 12362.4, 2);
+    expect((await balanceOf(u.token)).balance).toBeCloseTo(2000 - 185.44, 2);
 
     // A webhook alone isn't trusted: Cashwyre still says "processing".
     await hook('payout.success', { reference: init.Reference, status: 'success' });
@@ -194,12 +194,12 @@ describe('transfers', () => {
   });
 
   test('declined straight away: refunded, and quotes can\'t be reused by others or changed', async () => {
-    const u = await user('NG', 50000);
+    const u = await user('SL', 5000);
     const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
       country: 'NG', accountType: 'bank', bankCode: '0014', accountNumber: '0000000', accountName: 'Bad Account', amount: 1000,
     });
-    expect(q.body.data.charge).toBeCloseTo(1020.1, 2);
-    const other = await user('NG', 50000);
+    expect(q.body.data.charge).toBeCloseTo(543.95, 2); // $22 × Le 24 × 1.02 × 1.01
+    const other = await user('SL', 5000);
     const stolen = await api().post('/api/payouts/send').set(auth(other.token)).send({ quoteToken: q.body.data.quoteToken, pin: other.pin });
     expect(stolen.body.code).toBe('QUOTE_INVALID');
     const tampered = await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: `${q.body.data.quoteToken}x`, pin: u.pin });
@@ -208,11 +208,11 @@ describe('transfers', () => {
     const s = await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
     expect(s.status).toBe(400);
     expect(s.body.code).toBe('TRANSFER_DECLINED');
-    expect((await balanceOf(u.token)).balance).toBeCloseTo(50000, 2);
+    expect((await balanceOf(u.token)).balance).toBeCloseTo(5000, 2);
   });
 
   test('wrong bank or unsupported method is refused before any money moves', async () => {
-    const u = await user('NG', 50000);
+    const u = await user('SL', 5000);
     const r = await api().post('/api/payouts/quote').set(auth(u.token)).send({
       country: 'NG', accountType: 'mobile_money', bankCode: 'X', accountNumber: '08031234567', accountName: 'Ada Obi', amount: 1000,
     });
@@ -228,25 +228,25 @@ describe('transfers', () => {
 
 describe('dollar cards', () => {
   const details = {
-    amountUsd: 10, brand: 'Visa', dateOfBirth: '1992-04-15', homeAddressNumber: '12B', homeAddress: 'Allen Avenue, Ikeja, Lagos', idType: 'nin', idNumber: '11002200301',
+    amountUsd: 10, brand: 'Visa', dateOfBirth: '1992-04-15', homeAddressNumber: '12B', homeAddress: 'Wilkinson Road, Freetown', idType: 'national_id', idNumber: 'SL1234567', idImageBase64: 'aGVsbG8=',
   };
 
   test('create, top up, reveal, withdraw back to the wallet, freeze', async () => {
-    const u = await user('NG', 100000);
+    const u = await user('SL', 5000);
     const cfg = await api().get('/api/cards/config').set(auth(u.token));
-    expect(cfg.body.data.idTypes.map((t) => t.id)).toEqual(['nin', 'bvn']);
+    expect(cfg.body.data.idTypes.map((t) => t.id)).toEqual(['national_id', 'voters_card']);
 
     const quote = await api().get('/api/cards/quote?action=create&amountUsd=10').set(auth(u.token));
-    expect(quote.body.data).toEqual(expect.objectContaining({ feeUsd: 2.5, totalUsd: 12.5, local: 20200 })); // 12.5 × 1600 × 1.01
+    expect(quote.body.data).toEqual(expect.objectContaining({ feeUsd: 2.5, totalUsd: 12.5, local: 303 })); // 12.5 × Le 24 × 1.01
 
     const c = await api().post('/api/cards').set(auth(u.token)).send({ ...details, pin: u.pin });
     expect(c.status).toBe(201);
     expect(c.body.data.card).toEqual(expect.objectContaining({ status: 'active', brand: 'Visa', balanceUsd: 10 }));
     expect(c.body.data.card.number).toBeUndefined();
-    expect(c.body.data.transaction).toEqual(expect.objectContaining({ type: 'card_create', status: 'success', amount: 20200 }));
+    expect(c.body.data.transaction).toEqual(expect.objectContaining({ type: 'card_create', status: 'success', amount: 303 }));
     const create = calls.find((x) => x.path === 'CustomerCard/createCard').body;
-    expect(create).toEqual(expect.objectContaining({ phoneCode: '+234', cardType: 'virtual', amountInUSD: 10, idType: 'nin' }));
-    expect((await balanceOf(u.token)).balance).toBeCloseTo(100000 - 20200, 2);
+    expect(create).toEqual(expect.objectContaining({ phoneCode: '+232', cardType: 'virtual', amountInUSD: 10, idType: 'national_id', idTypeBase64: 'aGVsbG8=' }));
+    expect((await balanceOf(u.token)).balance).toBeCloseTo(5000 - 303, 2);
     const created = await Transaction.findOne({ type: 'card_create', user: u.user.id });
     expect(created.status).toBe('success');
 
@@ -268,8 +268,8 @@ describe('dollar cards', () => {
     expect(w.status).toBe(201);
     const wt = await Transaction.findById(w.body.data.transaction.id);
     expect(wt.status).toBe('success'); // confirmed in the card's history
-    expect(wt.amount).toBe(441000); // $3 × ₦1500 × 0.98
-    expect((await balanceOf(u.token)).balance).toBeCloseTo(before + 4410, 2);
+    expect(wt.amount).toBe(6468); // $3 × Le 22 × 0.98
+    expect((await balanceOf(u.token)).balance).toBeCloseTo(before + 64.68, 2);
 
     const f = await api().post(`/api/cards/${id}/freeze`).set(auth(u.token));
     expect(f.body.data.status).toBe('frozen');
@@ -288,7 +288,7 @@ describe('dollar cards', () => {
       return realFetch(url, opts);
     });
     const c = await api().post('/api/cards').set(auth(u.token)).send({
-      ...details, idType: 'national_id', idImageBase64: 'aGVsbG8=', pin: u.pin,
+      ...details, pin: u.pin,
     });
     cashwyre.setFetch(realFetch);
     expect(c.status).toBe(201);
@@ -304,7 +304,20 @@ describe('dollar cards', () => {
 
   test('Sierra Leone ID types need a photo', async () => {
     const u = await user('SL', 5000);
-    const r = await api().post('/api/cards').set(auth(u.token)).send({ ...details, idType: 'national_id', pin: u.pin });
+    const { idImageBase64, ...noPhoto } = details;
+    const r = await api().post('/api/cards').set(auth(u.token)).send({ ...noPhoto, pin: u.pin });
     expect(r.body.code).toBe('ID_IMAGE_REQUIRED');
+  });
+});
+
+describe('Sierra Leone only', () => {
+  test('Nigerian accounts can\'t use transfers abroad or dollar cards', async () => {
+    const u = await user('NG', 50000);
+    for (const [method, path] of [['get', '/api/payouts/countries'], ['post', '/api/payouts/quote'], ['get', '/api/cards'], ['post', '/api/cards']]) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await api()[method](path).set(auth(u.token)).send({});
+      expect(r.status).toBe(403);
+      expect(r.body.code).toBe('WRONG_COUNTRY');
+    }
   });
 });

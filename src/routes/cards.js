@@ -4,6 +4,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { validate, z, fields } = require('../middleware/validate');
 const { asyncHandler, ok } = require('../utils/helpers');
+const { forbidden } = require('../utils/errors');
 const { getSettings } = require('../services/settings');
 const cards = require('../services/cards');
 const serialize = require('../serializers');
@@ -11,6 +12,10 @@ const { Transaction } = require('../models');
 
 const router = express.Router();
 router.use(requireAuth);
+// Sierra Leone accounts only.
+router.use((req, res, next) =>
+  next(req.user.country === 'SL' ? undefined : forbidden('Dollar cards are for Sierra Leone accounts.', 'WRONG_COUNTRY')),
+);
 
 const usd = z.coerce.number({ invalid_type_error: 'Enter an amount in dollars' }).positive('Enter an amount in dollars').max(10_000);
 const idParam = validate({ params: z.object({ id: fields.objectId }) });

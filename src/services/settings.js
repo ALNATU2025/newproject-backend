@@ -45,10 +45,8 @@ const DEFAULTS = {
     sl_electricity: { perTxn: 20_000 * LEONE, daily: 50_000 * LEONE },
     sl_cable: { perTxn: 10_000 * LEONE, daily: 30_000 * LEONE },
     sl_transfer: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
-    // Cashwyre transfers and dollar cards, in the sender's currency
-    payout: { perTxn: 1_000_000 * NAIRA, daily: 3_000_000 * NAIRA },
+    // Cashwyre transfers and dollar cards (Sierra Leone, Leones)
     sl_payout: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
-    card: { perTxn: 1_000_000 * NAIRA, daily: 3_000_000 * NAIRA },
     sl_card: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
   },
 
@@ -67,9 +65,7 @@ const DEFAULTS = {
     sl_electricity: 20 * LEONE,
     sl_cable: 10 * LEONE,
     sl_transfer: 5 * LEONE,
-    payout: 500 * NAIRA,
     sl_payout: 10 * LEONE,
-    card: 0,
     sl_card: 0,
   },
 

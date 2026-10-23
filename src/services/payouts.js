@@ -28,7 +28,8 @@ const ACCOUNT_TYPES = { bank: 'bank', mobile_money: 'wallet' };
 const QUOTE_TTL = '10m';
 const DUPLICATE_WINDOW_MS = 60 * 1000;
 
-const serviceFor = (user) => (user.country === 'SL' ? 'sl_payout' : 'payout');
+// Sierra Leone accounts only (the routes refuse other countries).
+const serviceFor = () => 'sl_payout';
 
 // Countries Cashwyre pays out to (from their documentation), used when
 // their country list can't be read.

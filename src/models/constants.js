@@ -29,16 +29,14 @@ const SERVICES = [
   'transfer',
   ...SL_SERVICES,
   'sl_transfer',
-  // Cashwyre: transfers to banks / mobile money in other countries, and
-  // virtual dollar cards (each country has its own switch and limits).
-  'payout',
+  // Cashwyre (Sierra Leone only): transfers to banks / mobile money, also
+  // in other countries, and virtual dollar cards.
   'sl_payout',
-  'card',
   'sl_card',
 ];
 
 const TRANSFER_SERVICES = ['transfer', 'sl_transfer'];
-const CASHWYRE_SERVICES = ['payout', 'sl_payout', 'card', 'sl_card'];
+const CASHWYRE_SERVICES = ['sl_payout', 'sl_card'];
 const BILL_SERVICES = SERVICES.filter((s) => !TRANSFER_SERVICES.includes(s) && !CASHWYRE_SERVICES.includes(s));
 
 /** Transaction types for dollar cards. */
@@ -64,9 +62,7 @@ const SERVICE_LABELS = {
   sl_electricity: 'EDSA Electricity',
   sl_cable: 'Cable TV (Sierra Leone)',
   sl_transfer: 'Money Transfer (Sierra Leone)',
-  payout: 'Bank & Mobile Money Transfer',
   sl_payout: 'Bank & Mobile Money Transfer (Sierra Leone)',
-  card: 'Dollar Card',
   sl_card: 'Dollar Card (Sierra Leone)',
 };
 

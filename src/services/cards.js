@@ -40,7 +40,8 @@ const ID_TYPES = {
   ],
 };
 
-const serviceFor = (user) => (user.country === 'SL' ? 'sl_card' : 'card');
+// Sierra Leone accounts only (the routes refuse other countries).
+const serviceFor = () => 'sl_card';
 const cents = (usd) => Math.round(Number(usd) * 100);
 const usd2 = (v) => Math.round(Number(v) * 100) / 100;
 

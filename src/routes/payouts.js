@@ -1,15 +1,20 @@
-// Bank and mobile money transfers through Cashwyre, for Nigeria and
-// Sierra Leone accounts. Amounts in the API are major units.
+// Bank and mobile money transfers through Cashwyre, for Sierra Leone
+// accounts. Amounts in the API are major units.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { validate, z, fields } = require('../middleware/validate');
 const { asyncHandler, ok } = require('../utils/helpers');
+const { forbidden } = require('../utils/errors');
 const cashwyre = require('../providers/cashwyre');
 const payouts = require('../services/payouts');
 const serialize = require('../serializers');
 
 const router = express.Router();
 router.use(requireAuth);
+// Sierra Leone accounts only (they can send to any supported country).
+router.use((req, res, next) =>
+  next(req.user.country === 'SL' ? undefined : forbidden('Bank and mobile money transfers are for Sierra Leone accounts.', 'WRONG_COUNTRY')),
+);
 
 const country = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, 'Choose a country');
 const accountType = z.enum(['bank', 'mobile_money']);
