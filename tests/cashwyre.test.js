@@ -241,15 +241,16 @@ describe('dollar cards', () => {
 
     const c = await api().post('/api/cards').set(auth(u.token)).send({ ...details, pin: u.pin });
     expect(c.status).toBe(201);
-    expect(c.body.data).toEqual(expect.objectContaining({ status: 'active', brand: 'Visa', balanceUsd: 10 }));
-    expect(c.body.data.number).toBeUndefined();
+    expect(c.body.data.card).toEqual(expect.objectContaining({ status: 'active', brand: 'Visa', balanceUsd: 10 }));
+    expect(c.body.data.card.number).toBeUndefined();
+    expect(c.body.data.transaction).toEqual(expect.objectContaining({ type: 'card_create', status: 'success', amount: 20200 }));
     const create = calls.find((x) => x.path === 'CustomerCard/createCard').body;
     expect(create).toEqual(expect.objectContaining({ phoneCode: '+234', cardType: 'virtual', amountInUSD: 10, idType: 'nin' }));
     expect((await balanceOf(u.token)).balance).toBeCloseTo(100000 - 20200, 2);
     const created = await Transaction.findOne({ type: 'card_create', user: u.user.id });
     expect(created.status).toBe('success');
 
-    const id = c.body.data.id;
+    const id = c.body.data.card.id;
     const top = await api().post(`/api/cards/${id}/topup`).set(auth(u.token)).send({ amountUsd: 5, pin: u.pin });
     expect(top.status).toBe(201);
     expect(top.body.data.transaction.status).toBe('success');
@@ -291,12 +292,12 @@ describe('dollar cards', () => {
     });
     cashwyre.setFetch(realFetch);
     expect(c.status).toBe(201);
-    expect(c.body.data.status).toBe('creating');
+    expect(c.body.data.card.status).toBe('creating');
 
     cardsByEmail[email] = [fakeCard(email, 99, 10)];
     const h = await hook('virtualcard.created.completed', { cardCode: 'VCARD99', CustomerEmail: email });
     expect(h.body.data.result).toBe('linked');
-    const card = await Card.findById(c.body.data.id);
+    const card = await Card.findById(c.body.data.card.id);
     expect(card.status).toBe('active');
     expect(card.cardCode).toBe('VCARD99');
   });

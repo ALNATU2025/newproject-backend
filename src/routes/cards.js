@@ -7,6 +7,7 @@ const { asyncHandler, ok } = require('../utils/helpers');
 const { getSettings } = require('../services/settings');
 const cards = require('../services/cards');
 const serialize = require('../serializers');
+const { Transaction } = require('../models');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -42,7 +43,11 @@ router.post(
       pin: fields.pin,
     }),
   }),
-  asyncHandler(async (req, res) => ok(res, serialize.card(await cards.create(req.user, req.body)), 201)),
+  asyncHandler(async (req, res) => {
+    const card = await cards.create(req.user, req.body);
+    const txn = await Transaction.findById(card.createTransaction);
+    ok(res, { card: serialize.card(card), transaction: serialize.transaction(txn) }, 201);
+  }),
 );
 
 router.post(
