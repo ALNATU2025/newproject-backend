@@ -406,6 +406,37 @@ describe('international airtime / data / PINs', () => {
     expect(pay.body.amount).toBe(15);
   });
 
+  test('Sierra Leone: same VTpass plans, priced and paid in Leones', async () => {
+    const { User } = require('../src/models');
+    const { updateSettings } = require('../src/services/settings');
+    await updateSettings({ slInternational: { rateLePerNaira: 0.015, marginPercent: 0 } });
+    try {
+      const u = await readyUser({ country: 'SL' });
+      await User.updateOne({ _id: u.user.id }, { $set: { balance: 1000 * 100 } });
+      const r = (await api().get('/api/services/sl/international/variations?country=GH&operator=5&productType=1').set(tv(u))).body.data;
+      expect(r.variations[0]).toEqual(expect.objectContaining({ fixed: true, nairaAmount: 405 })); // ₦27,000 × 0.015
+      expect(r.variations[2].rate).toBeCloseTo(0.45, 5); // ₦30 per unit × 0.015
+
+      const buy = await api().post('/api/services/sl/international').set(tv(u)).send({
+        country: 'GH', productType: '1', operator: '5', variationCode: '2470', phone: '0241234567', pin: u.pin,
+      });
+      expect(buy.status).toBe(201);
+      const t = buy.body.data.transaction;
+      expect(t).toEqual(expect.objectContaining({ status: 'success', amount: 405, currency: 'SLE', service: 'sl_international', recipient: '+233241234567' }));
+      expect(t.metadata.nairaCost).toBe(27000);
+      const pay = fake.calls.filter((c) => c.path === 'pay').pop();
+      expect(pay.body).toEqual(expect.objectContaining({ serviceID: 'foreign-airtime', variation_code: '2470', amount: 15 }));
+      expect((await balanceOf(u.token)).balance).toBeCloseTo(595, 2);
+
+      // Nigerian accounts use their own screen.
+      const ng = await readyUser({ fund: 1000 });
+      const blocked = await api().get('/api/services/sl/international/countries').set(tv(ng));
+      expect(blocked.body.code).toBe('WRONG_COUNTRY');
+    } finally {
+      await updateSettings({ slInternational: { rateLePerNaira: null, marginPercent: 3 } });
+    }
+  });
+
   test('range plan marked fixed by VTpass: amount is asked for and sent', async () => {
     const u = await readyUser({ fund: 30000 });
     const r = await api().post('/api/services/international').set(tv(u)).send({

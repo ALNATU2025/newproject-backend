@@ -28,6 +28,8 @@ const SERVICES = [
   'international',
   'transfer',
   ...SL_SERVICES,
+  // International airtime for Sierra Leone accounts (VTpass, paid in Le)
+  'sl_international',
   'sl_transfer',
   // Cashwyre (Sierra Leone only): transfers to banks / mobile money, also
   // in other countries, and virtual dollar cards.
@@ -61,6 +63,7 @@ const SERVICE_LABELS = {
   sl_data: 'Data (Sierra Leone)',
   sl_electricity: 'EDSA Electricity',
   sl_cable: 'Cable TV (Sierra Leone)',
+  sl_international: 'International Airtime (Sierra Leone)',
   sl_transfer: 'Money Transfer (Sierra Leone)',
   sl_payout: 'Bank & Mobile Money Transfer (Sierra Leone)',
   sl_card: 'Dollar Card (Sierra Leone)',

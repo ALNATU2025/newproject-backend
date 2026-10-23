@@ -27,6 +27,7 @@ const DEFAULTS = {
     sl_data: { user: 0, platform: 0 },
     sl_electricity: { user: 0, platform: 0 },
     sl_cable: { user: 0, platform: 0 },
+    sl_international: { user: 0, platform: 0 },
   },
 
   // Default limits per service (kobo; null = unlimited)
@@ -44,6 +45,7 @@ const DEFAULTS = {
     sl_data: { perTxn: 2_000 * LEONE, daily: 10_000 * LEONE },
     sl_electricity: { perTxn: 20_000 * LEONE, daily: 50_000 * LEONE },
     sl_cable: { perTxn: 10_000 * LEONE, daily: 30_000 * LEONE },
+    sl_international: { perTxn: 2_000 * LEONE, daily: 10_000 * LEONE },
     sl_transfer: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
     // Cashwyre transfers and dollar cards (Sierra Leone, Leones)
     sl_payout: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
@@ -64,6 +66,7 @@ const DEFAULTS = {
     sl_data: 1 * LEONE,
     sl_electricity: 20 * LEONE,
     sl_cable: 10 * LEONE,
+    sl_international: 1 * LEONE,
     sl_transfer: 5 * LEONE,
     sl_payout: 10 * LEONE,
     sl_card: 0,
@@ -126,6 +129,14 @@ const DEFAULTS = {
   // What admins hear about by push and webhook (alerts always go out).
   adminNotify: {
     transactions: true, // every credit and debit
+  },
+
+  // Sierra Leone international airtime: VTpass charges your Naira wallet,
+  // the customer pays Leones. Rate = Le per ₦1 (null = from Cashwyre's
+  // dollar rates), plus your margin. Edit in Admin → Sierra Leone.
+  slInternational: {
+    rateLePerNaira: null,
+    marginPercent: 3,
   },
 
   lowBalanceAlerts: true,

@@ -7,7 +7,9 @@ const { requireAuth } = require('../middleware/auth');
 const { validate, z, fields } = require('../middleware/validate');
 const { asyncHandler, ok } = require('../utils/helpers');
 const { toKobo, toNaira } = require('../utils/money');
-const { badRequest, forbidden } = require('../utils/errors');
+const { badRequest, forbidden, unavailable } = require('../utils/errors');
+const { getSettings } = require('../services/settings');
+const { usdRate } = require('../services/fx');
 const { billProvider } = require('../providers/bill');
 const { executePurchase } = require('../services/purchase');
 const serialize = require('../serializers');
@@ -165,6 +167,122 @@ router.post(
       description: `${tv.name} · ${chosen.name}`,
       providerParams: { provider, planCode, phone: req.body.phone || req.user.phone },
       metadata: { provider: tv.name, plan: chosen.name, customerName: customer.customerName },
+    });
+    respond(res, txn);
+  }),
+);
+
+// ── International airtime (VTpass) ─────────────────────────
+// VTpass prices in Naira and charges your Naira VTpass wallet; the customer
+// pays Leones: Naira price × (Le per ₦1) × (1 + margin).
+
+/** Le the customer pays per ₦1 of VTpass price (margin included). */
+async function lePerNaira() {
+  const cfg = (await getSettings()).slInternational || {};
+  let rate = Number(cfg.rateLePerNaira) || 0;
+  if (!(rate > 0)) {
+    const [sle, ngn] = await Promise.all([usdRate('SLE', 'sell'), usdRate('NGN', 'buy')]);
+    rate = sle / ngn;
+  }
+  if (!(rate > 0)) throw unavailable('International airtime isn\'t available right now.', 'FX_UNAVAILABLE');
+  return rate * (1 + (Number(cfg.marginPercent) || 0) / 100);
+}
+
+const toLeCents = (kobo, rate) => Math.ceil(kobo * rate - 1e-6);
+
+router.get('/international/countries', asyncHandler(async (req, res) => ok(res, await p().intlCountries())));
+
+router.get(
+  '/international/product-types',
+  validate({ query: z.object({ country: z.string().length(2) }) }),
+  asyncHandler(async (req, res) => ok(res, await p().intlProductTypes(req.query.country))),
+);
+
+router.get(
+  '/international/operators',
+  validate({ query: z.object({ country: z.string().length(2), productType: z.string().min(1) }) }),
+  asyncHandler(async (req, res) => ok(res, await p().intlOperators(req.query.country, req.query.productType))),
+);
+
+/** Plans with prices in Leones ("rate" = Le per 1 unit of the foreign currency). */
+router.get(
+  '/international/variations',
+  validate({ query: z.object({ country: z.string().length(2), operator: z.string().min(1), productType: z.string().min(1) }) }),
+  asyncHandler(async (req, res) => {
+    const [r, conv] = await Promise.all([p().intlVariations(req.query.country, req.query.operator, req.query.productType), lePerNaira()]);
+    ok(res, {
+      ...r,
+      rate: r.rate ? r.rate * conv : null,
+      variations: r.variations.map((v) => ({
+        ...v,
+        rate: v.rate ? v.rate * conv : null,
+        nairaAmount: v.nairaAmount !== undefined && v.nairaAmount !== null ? toNaira(toLeCents(v.nairaAmount, conv)) : null,
+      })),
+    });
+  }),
+);
+
+router.post(
+  '/international',
+  validate({
+    body: z.object({
+      country: z.string().length(2),
+      productType: z.string().min(1),
+      operator: z.string().min(1),
+      variationCode: z.string().min(1),
+      phone: fields.anyPhone,
+      amount: z.coerce.number().positive().optional(), // foreign currency, for "any amount" plans
+      email: z.string().email().optional().or(z.literal('')),
+      pin: fields.pin,
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const country = (await p().intlCountries()).find((c) => c.code === b.country);
+    if (!country) throw badRequest('Choose a valid country.', 'INVALID_COUNTRY');
+    const operator = (await p().intlOperators(b.country, b.productType)).find((o) => o.id === b.operator);
+    if (!operator) throw badRequest('Choose a valid network.', 'INVALID_OPERATOR');
+    const { rate, currency, variations } = await p().intlVariations(b.country, b.operator, b.productType);
+    const v = variations.find((x) => x.code === b.variationCode);
+    if (!v) throw badRequest('Choose a valid plan.', 'PLAN_NOT_FOUND');
+    const planRate = v.rate || rate; // ₦ per 1 unit of the foreign currency
+    let foreign;
+    let naira; // kobo, what VTpass charges
+    if (v.fixed) {
+      foreign = v.amount || null;
+      naira = v.nairaAmount ?? (foreign && planRate ? toKobo(foreign * planRate) : null);
+    } else {
+      foreign = Number(b.amount);
+      if (!Number.isFinite(foreign) || foreign < (v.min || 0) || foreign > (v.max || Infinity)) {
+        throw badRequest(`Enter an amount between ${currency} ${v.min} and ${currency} ${v.max}.`, 'AMOUNT_OUT_OF_RANGE');
+      }
+      naira = planRate ? toKobo(foreign * planRate) : null;
+    }
+    if (!naira || naira <= 0) throw unavailable('The price for this plan isn\'t available right now. Please try another.', 'PRICE_UNAVAILABLE');
+    const conv = await lePerNaira();
+    const amount = toLeCents(naira, conv);
+    const local = b.phone.replace(/^\+/, '');
+    const national = local.startsWith(country.dialCode.replace('+', '')) ? local.slice(country.dialCode.length - 1) : local.replace(/^0+/, '');
+    const txn = await executePurchase({
+      user: req.user,
+      service: 'sl_international',
+      pin: b.pin,
+      amount,
+      recipient: `${country.dialCode}${national}`,
+      description: `${operator.name} · ${country.name}`,
+      providerParams: {
+        // VTpass is paid in Naira.
+        amount: naira,
+        country: b.country,
+        productType: b.productType,
+        operator: b.operator,
+        variationCode: v.code,
+        foreignAmount: foreign,
+        fixed: Boolean(v.fixed),
+        email: b.email || req.user.email,
+        phone: local,
+      },
+      metadata: { country: country.name, operator: operator.name, currency, foreignAmount: foreign, rate: planRate * conv, plan: v.name, nairaCost: naira / 100, lePerNaira: conv },
     });
     respond(res, txn);
   }),

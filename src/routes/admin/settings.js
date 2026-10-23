@@ -50,6 +50,7 @@ function publicSettings(s) {
       Object.entries(s.slTiers || {}).map(([t, v]) => [t, { daily: nairaOrNull(v.daily), maxBalance: nairaOrNull(v.maxBalance) }]),
     ),
     adminNotify: s.adminNotify,
+    slInternational: s.slInternational,
     slFunding: {
       minAmount: toNaira(s.slFunding.minAmount),
       maxAmount: toNaira(s.slFunding.maxAmount),
@@ -104,6 +105,12 @@ router.patch(
         )
         .optional(),
       adminNotify: z.object({ transactions: z.boolean().optional() }).optional(),
+      slInternational: z
+        .object({
+          rateLePerNaira: z.coerce.number().positive().nullable().optional(),
+          marginPercent: z.coerce.number().min(0).max(50).optional(),
+        })
+        .optional(),
       cashwyre: z
         .object({
           payoutFeePercent: z.coerce.number().min(0).max(50).optional(),
@@ -159,6 +166,9 @@ router.patch(
       }
     }
     if (b.adminNotify) patch.adminNotify = b.adminNotify;
+    if (b.slInternational) {
+      patch.slInternational = Object.fromEntries(Object.entries(b.slInternational).filter(([, v]) => v !== undefined));
+    }
     if (b.cashwyre) {
       patch.cashwyre = Object.fromEntries(Object.entries(b.cashwyre).filter(([, v]) => v !== undefined));
     }

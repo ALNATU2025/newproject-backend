@@ -56,8 +56,12 @@ const METHOD_SERVICE = {
  * @param {object} o.base         provider for services not listed in routes
  * @param {object} [o.routes]     { cable: providerObject, ... }
  */
+// Sierra Leone international airtime uses the same provider (VTpass) as
+// Nigeria's: the provider sees it as "international".
+const ALIASES = { sl_international: 'international' };
+
 function createRouter({ base, routes = {} }) {
-  const forService = (service) => routes[service] || base;
+  const forService = (service) => routes[service] || (ALIASES[service] ? routes[ALIASES[service]] || base : base);
   const all = [...new Set([base, ...Object.values(routes)])];
   // The provider an admin most cares about for balance/health: the routed
   // (real) one when there is one.
@@ -85,12 +89,12 @@ function createRouter({ base, routes = {} }) {
       ),
     purchase: (args = {}) => {
       if (!args.service) throw unavailable('Unknown service.', 'PROVIDER_NOT_CONFIGURED');
-      return forService(args.service).purchase(args);
+      return forService(args.service).purchase({ ...args, service: ALIASES[args.service] || args.service });
     },
     /** Asks the provider that handled the payment (by its stored name). */
     requery: (reference, { service, provider } = {}) => {
       const byName = all.find((p) => p.name === provider);
-      return (byName || forService(service)).requery(reference);
+      return (byName || forService(service)).requery(reference, { service: ALIASES[service] || service });
     },
     balance: () => primary.balance(),
     health: () => primary.health(),
@@ -117,6 +121,7 @@ function fromEnv() {
     const vt = env.billProvider === 'vtpass' ? base : make('vtpass');
     for (const s of env.vtpass.services) {
       if (!BILL_SERVICES.includes(s)) throw new Error(`VTPASS_SERVICES: unknown service "${s}"`);
+      if (s === 'international') routes.sl_international = vt;
       routes[s] = vt;
     }
   }
