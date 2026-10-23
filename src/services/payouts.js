@@ -46,15 +46,36 @@ const KNOWN = {
 
 const COUNTRY_TTL = 6 * 60 * 60 * 1000;
 const BANK_TTL = 60 * 60 * 1000;
+const EMPTY_TTL = 10 * 60 * 1000; // empty lists are asked again sooner
 let countryCache = null;
 let countryCachedAt = 0;
 const bankCache = new Map();
 
-async function bankList(country, type) {
+// Ways to ask Cashwyre for the list, tried in order until one has entries
+// (their API returns an empty list for some countries with the filter).
+const LIST_VARIANTS = {
+  bank: [['bank', 'payout'], ['bank', ''], ['Bank', '']],
+  mobile_money: [['wallet', 'payout'], ['wallet', ''], ['mobile_money', ''], ['momo', '']],
+};
+
+async function bankList(country, type, { fresh = false } = {}) {
   const key = `${country}:${type}`;
   const hit = bankCache.get(key);
-  if (hit && Date.now() - hit.at < BANK_TTL) return hit.list;
-  const list = await cashwyre.banks(country, ACCOUNT_TYPES[type]);
+  if (!fresh && hit && Date.now() - hit.at < (hit.list.length ? BANK_TTL : EMPTY_TTL)) return hit.list;
+  let list = [];
+  let lastError = null;
+  for (const [accountType, transactionType] of LIST_VARIANTS[type] || []) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      list = await cashwyre.banks(country, accountType, { transactionType });
+      lastError = null;
+    } catch (e) {
+      lastError = e;
+      list = [];
+    }
+    if (list.length) break;
+  }
+  if (lastError && !list.length) throw lastError;
   bankCache.set(key, { at: Date.now(), list });
   return list;
 }
@@ -73,17 +94,21 @@ async function safeCount(country, type) {
  */
 async function baseCountries({ fresh = false } = {}) {
   if (!fresh && countryCache && Date.now() - countryCachedAt < COUNTRY_TTL) return countryCache;
-  let list;
+  // Every payout country from Cashwyre's documentation, plus any their
+  // country list adds. (That list is about crypto on/off-ramp, so it isn't
+  // used to remove countries; the bank / mobile money lists decide.)
+  const byCode = new Map(Object.entries(KNOWN).map(([code, [name, currency]]) => [code, { code, name, currency }]));
   try {
-    list = (await cashwyre.countries())
-      .filter((c) => c.canPayout && c.code)
-      .map((c) => ({ code: c.code, name: c.name || (KNOWN[c.code] || [c.code])[0], currency: c.currencies[0] || (KNOWN[c.code] || [])[1] }));
+    for (const c of await cashwyre.countries()) {
+      if (!c.code || c.code === 'US') continue;
+      const known = byCode.get(c.code);
+      if (known) known.name = c.name || known.name;
+      else if (c.canPayout && c.currencies[0]) byCode.set(c.code, { code: c.code, name: c.name || c.code, currency: c.currencies[0] });
+    }
   } catch (e) {
     if (e instanceof AppError && e.code === 'PROVIDER_NOT_CONFIGURED') throw e;
-    list = [];
   }
-  if (!list.length) list = Object.entries(KNOWN).map(([code, [name, currency]]) => ({ code, name, currency }));
-  list = list.filter((c) => c.currency);
+  const list = [...byCode.values()].filter((c) => c.currency);
 
   const out = [];
   for (let i = 0; i < list.length; i += 6) {
@@ -122,6 +147,32 @@ async function payoutCountries(opts) {
     const b = balances[c.currency];
     return { ...c, wallet: debitWalletFor(c.currency, 'SLE') || c.currency, available: b === null || b === undefined ? null : b > 0 };
   });
+}
+
+/** For admins: what Cashwyre reports for every country (fresh). */
+async function coverage() {
+  const list = await baseCountries({ fresh: true });
+  const all = new Map(Object.entries(KNOWN).map(([code, [name, currency]]) => [code, { code, name, currency }]));
+  for (const c of list) all.set(c.code, { ...all.get(c.code), ...c });
+  const rows = [];
+  for (const c of all.values()) {
+    const row = { code: c.code, name: c.name, currency: c.currency, shown: list.some((x) => x.code === c.code) };
+    for (const type of ['bank', 'mobile_money']) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const l = await bankList(c.code, type);
+        row[type] = { count: l.length, examples: l.slice(0, 4).map((b) => b.name) };
+      } catch (e) {
+        row[type] = { count: null, error: e.message };
+      }
+    }
+    // eslint-disable-next-line no-await-in-loop
+    row.walletBalance = await businessBalance(debitWalletFor(c.currency, 'SLE') || c.currency);
+    row.wallet = debitWalletFor(c.currency, 'SLE') || c.currency;
+    rows.push(row);
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return rows;
 }
 
 function clearPayoutCache() {
@@ -569,6 +620,7 @@ async function onPayoutEvent(eventData, eventType = '') {
 module.exports = {
   ACCOUNT_TYPES,
   payoutCountries,
+  coverage,
   clearPayoutCache,
   bankList,
   findCountry,

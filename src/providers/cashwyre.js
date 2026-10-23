@@ -96,8 +96,10 @@ async function countries() {
 }
 
 /** Banks (accountType "bank") or mobile money wallets ("wallet") for payouts. */
-async function banks(country, accountType = 'bank') {
-  const rows = (await call('CountryBank/getCountryBanks', { country, accountType, transactionType: 'payout' })) || [];
+async function banks(country, accountType = 'bank', { transactionType = 'payout' } = {}) {
+  const body = { country, accountType, ...(transactionType ? { transactionType } : {}) };
+  const rows = (await call('CountryBank/getCountryBanks', body)) || [];
+  if (!Array.isArray(rows)) return [];
   return rows
     .map((b) => ({
       code: String(pick(b, 'code') || ''),

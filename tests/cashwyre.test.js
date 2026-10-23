@@ -60,6 +60,8 @@ async function fakeCashwyre(url, opts) {
         })),
       );
     case 'CountryBank/getCountryBanks':
+      // Kenya's banks only come back without the payout filter.
+      if (b.country === 'KE' && b.accountType === 'bank') return okData(b.transactionType ? [] : [{ code: 'KCB', name: 'KCB Bank' }]);
       return okData(BANKS[`${b.country}:${b.accountType}`] || []);
     case 'Payout/getFee':
       if (b.currency === 'GHS') return okData({ sendAmount: b.amount, currency: 'GHS', feeInLocalCurrency: 3, totalDebitAmount: b.amount + 3, totalDebitInUSD: 7.5 });
@@ -141,7 +143,10 @@ describe('countries and banks', () => {
     const r = await api().get('/api/payouts/countries').set(auth(u.token));
     expect(r.status).toBe(200);
     const byCode = Object.fromEntries(r.body.data.countries.map((c) => [c.code, c]));
-    expect(Object.keys(byCode).sort()).toEqual(['GH', 'NG', 'SL']); // US can't receive payouts
+    // All documented payout countries are checked; those with banks or
+    // mobile money are shown (Kenya's banks needed a second try).
+    expect(Object.keys(byCode).sort()).toEqual(['GH', 'KE', 'NG', 'SL']);
+    expect(byCode.KE).toEqual(expect.objectContaining({ name: 'Kenya', currency: 'KES', bank: true, mobileMoney: false }));
     expect(byCode.GH).toEqual(expect.objectContaining({ currency: 'GHS', bank: true, mobileMoney: true }));
     expect(byCode.NG).toEqual(expect.objectContaining({ bank: true, mobileMoney: false }));
     expect(byCode.SL).toEqual(expect.objectContaining({ bank: false, mobileMoney: true }));
@@ -150,6 +155,22 @@ describe('countries and banks', () => {
 
     const w = await api().get('/api/payouts/banks?country=SL&type=mobile_money').set(auth(u.token));
     expect(w.body.data).toEqual([expect.objectContaining({ code: 'OrangeMoney_SL', name: 'Orange Money' })]);
+  });
+});
+
+describe('admin coverage', () => {
+  test('shows what Cashwyre reports for every country', async () => {
+    const admin = await readyUser({ role: 'super' });
+    const r = await api().get('/api/admin/cashwyre/coverage').set(auth(admin.token));
+    expect(r.status).toBe(200);
+    const rows = r.body.data.countries;
+    expect(rows.length).toBeGreaterThanOrEqual(22);
+    const gn = rows.find((c) => c.code === 'GN');
+    expect(gn).toEqual(expect.objectContaining({ currency: 'GNF', shown: false, wallet: 'GNF' }));
+    expect(gn.bank.count).toBe(0);
+    const sl = rows.find((c) => c.code === 'SL');
+    expect(sl).toEqual(expect.objectContaining({ shown: true, walletBalance: 100000 }));
+    expect(sl.mobile_money.examples).toEqual(['Orange Money']);
   });
 });
 
