@@ -14,7 +14,7 @@ const ALERT_AFTER_MS = 30 * 60 * 1000;
 async function sweepOnce({ now = Date.now(), limit = 25 } = {}) {
   const pending = await Transaction.find({
     status: 'pending',
-    type: { $in: BILL_SERVICES },
+    type: { $in: [...BILL_SERVICES, 'payout'] },
     provider: { $nin: [null, 'none'] },
     createdAt: { $lte: new Date(now - MIN_AGE_MS), $gte: new Date(now - MAX_AGE_MS) },
   })
@@ -42,6 +42,12 @@ async function sweepOnce({ now = Date.now(), limit = 25 } = {}) {
     } catch (e) {
       results.push('error');
     }
+  }
+  try {
+    // eslint-disable-next-line global-require
+    await require('./cards').sweepCards({ now });
+  } catch (e) {
+    results.push('error');
   }
   return results;
 }

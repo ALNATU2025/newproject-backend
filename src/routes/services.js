@@ -12,7 +12,8 @@ const { getSettings } = require('../services/settings');
 const { executePurchase } = require('../services/purchase');
 const { ratesFor } = require('../services/commission');
 const { effectiveLimits } = require('../services/limits');
-const { SERVICES, BILL_SERVICES } = require('../models/constants');
+const { SERVICES, BILL_SERVICES, CASHWYRE_SERVICES } = require('../models/constants');
+const cashwyre = require('../providers/cashwyre');
 const serialize = require('../serializers');
 
 const router = express.Router();
@@ -50,7 +51,10 @@ router.get(
       services: Object.fromEntries(SERVICES.map((k) => [k, s.services[k] !== false])),
       providerConnected: p().isConfigured(),
       // Per service: whether its provider is connected (payments possible).
-      connected: Object.fromEntries(BILL_SERVICES.map((k) => [k, p().isConfigured(k)])),
+      connected: {
+        ...Object.fromEntries(BILL_SERVICES.map((k) => [k, p().isConfigured(k)])),
+        ...Object.fromEntries(CASHWYRE_SERVICES.map((k) => [k, cashwyre.configured()])),
+      },
       requireApproval: Boolean(s.requireApproval),
     });
   }),

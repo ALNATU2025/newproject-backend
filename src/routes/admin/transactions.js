@@ -273,8 +273,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const t = await Transaction.findById(req.params.id);
     if (!t) throw notFound('Transaction not found.');
-    if (t.status !== 'pending' || !BILL_SERVICES.includes(t.type)) {
-      throw badRequest('Only pending bill payments can be checked with the provider.');
+    if (t.status !== 'pending' || !(BILL_SERVICES.includes(t.type) || t.type === 'payout')) {
+      throw badRequest('Only pending bill payments and transfers can be checked with the provider.');
     }
     let r;
     try {

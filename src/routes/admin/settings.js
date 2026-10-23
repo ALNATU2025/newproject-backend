@@ -44,6 +44,7 @@ function publicSettings(s) {
       indirectBonus: toNaira(s.slReferral.indirectBonus),
       minFirstDeposit: toNaira(s.slReferral.minFirstDeposit),
     },
+    cashwyre: s.cashwyre,
     slFunding: {
       minAmount: toNaira(s.slFunding.minAmount),
       maxAmount: toNaira(s.slFunding.maxAmount),
@@ -88,6 +89,17 @@ router.patch(
           minFirstDeposit: z.coerce.number().min(0).optional(),
         })
         .optional(),
+      cashwyre: z
+        .object({
+          payoutFeePercent: z.coerce.number().min(0).max(50).optional(),
+          fxMarginPercent: z.coerce.number().min(0).max(50).optional(),
+          cardFeePercent: z.coerce.number().min(0).max(50).optional(),
+          cardWithdrawMarginPercent: z.coerce.number().min(0).max(50).optional(),
+          minCardUsd: z.coerce.number().min(5).max(10_000).optional(),
+          maxCardUsd: z.coerce.number().min(5).max(10_000).optional(),
+          maxCardsPerUser: z.coerce.number().int().min(1).max(10).optional(),
+        })
+        .optional(),
       slFunding: z
         .object({
           minAmount: z.coerce.number().min(0).optional(),
@@ -122,6 +134,9 @@ router.patch(
       if (!b[key]) continue;
       patch[key] = {};
       for (const [k, v] of Object.entries(b[key])) if (v !== undefined) patch[key][k] = toKobo(v);
+    }
+    if (b.cashwyre) {
+      patch.cashwyre = Object.fromEntries(Object.entries(b.cashwyre).filter(([, v]) => v !== undefined));
     }
     if (b.slFunding) {
       patch.slFunding = {};

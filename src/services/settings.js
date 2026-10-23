@@ -45,6 +45,11 @@ const DEFAULTS = {
     sl_electricity: { perTxn: 20_000 * LEONE, daily: 50_000 * LEONE },
     sl_cable: { perTxn: 10_000 * LEONE, daily: 30_000 * LEONE },
     sl_transfer: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
+    // Cashwyre transfers and dollar cards, in the sender's currency
+    payout: { perTxn: 1_000_000 * NAIRA, daily: 3_000_000 * NAIRA },
+    sl_payout: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
+    card: { perTxn: 1_000_000 * NAIRA, daily: 3_000_000 * NAIRA },
+    sl_card: { perTxn: 20_000 * LEONE, daily: 100_000 * LEONE },
   },
 
   // Minimum amounts per service (kobo)
@@ -62,6 +67,22 @@ const DEFAULTS = {
     sl_electricity: 20 * LEONE,
     sl_cable: 10 * LEONE,
     sl_transfer: 5 * LEONE,
+    payout: 500 * NAIRA,
+    sl_payout: 10 * LEONE,
+    card: 0,
+    sl_card: 0,
+  },
+
+  // Cashwyre pricing. Your margin is added on top of Cashwyre's own fee
+  // and rate. Edit in Admin → Settings.
+  cashwyre: {
+    payoutFeePercent: 1, // % of what Cashwyre charges you for a transfer
+    fxMarginPercent: 2, // extra % when converting between currencies
+    cardFeePercent: 1, // % on card creation / top-up
+    cardWithdrawMarginPercent: 2, // % kept when moving card money back to the wallet
+    minCardUsd: 5,
+    maxCardUsd: 2_000,
+    maxCardsPerUser: 2,
   },
 
   minCommissionWithdrawal: 500 * NAIRA,

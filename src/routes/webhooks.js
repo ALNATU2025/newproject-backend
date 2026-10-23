@@ -7,6 +7,11 @@ const { asyncHandler, ok } = require('../utils/helpers');
 const { paymentProvider } = require('../providers/payment');
 const { creditDeposit } = require('../services/funding');
 const { raiseAlert } = require('../services/alerts');
+const crypto = require('crypto');
+const env = require('../config/env');
+const cashwyre = require('../providers/cashwyre');
+const payouts = require('../services/payouts');
+const cards = require('../services/cards');
 
 const router = express.Router();
 
@@ -54,6 +59,35 @@ router.post(
       body: `A payment of ₦${(event.amount / 100).toFixed(2)} (${event.providerReference}) didn't match any user.`,
     });
     return ok(res, { credited: false });
+  }),
+);
+
+// ── Cashwyre (transfers and dollar cards) ──────────────────
+// Give Cashwyre this URL for payout and card webhooks:
+//   https://<your server>/api/webhooks/cashwyre/<CASHWYRE_WEBHOOK_TOKEN>
+// Their webhooks aren't signed, so the secret is in the URL and every
+// event is confirmed with Cashwyre's API before money moves.
+router.post(
+  '/cashwyre/:token',
+  asyncHandler(async (req, res) => {
+    const expected = Buffer.from(env.cashwyre.webhookToken || '');
+    const given = Buffer.from(String(req.params.token || ''));
+    if (!expected.length || expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Not found.' });
+    }
+    const { pick } = cashwyre;
+    const eventType = String(pick(req.body || {}, 'eventType') || '').toLowerCase();
+    const data = pick(req.body || {}, 'eventData') || {};
+    let result = { ignored: true };
+    try {
+      if (eventType.startsWith('payout.')) result = await payouts.onPayoutEvent(data);
+      else if (eventType.startsWith('virtualcard.')) result = await cards.onCardEvent(eventType, data);
+    } catch (e) {
+      // Cashwyre doesn't retry; the sweeper will pick it up.
+      if (!env.isTest) console.warn(`[cashwyre webhook] ${eventType}: ${e.message}`);
+      result = { error: e.message };
+    }
+    return ok(res, { eventType, ...result });
   }),
 );
 

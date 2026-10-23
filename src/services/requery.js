@@ -14,6 +14,10 @@ const { fmt } = require('./limits');
  * Throws when the provider can't be reached (the payment stays pending).
  */
 async function requeryTransaction(t, { actor = null } = {}) {
+  if (t.type === 'payout') {
+    // eslint-disable-next-line global-require
+    return require('./payouts').checkPayout(t, { actor });
+  }
   if (t.status !== 'pending' || !BILL_SERVICES.includes(t.type)) {
     return { result: t.status, message: 'Not a pending bill payment.' };
   }

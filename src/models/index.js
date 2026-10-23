@@ -125,7 +125,33 @@ const Setting = mongoose.model(
   ),
 );
 
+/**
+ * A virtual dollar card issued through Cashwyre. The full card number and
+ * CVV are never stored: they're fetched from Cashwyre when the owner asks.
+ */
+const Card = mongoose.model(
+  'Card',
+  new Schema(
+    {
+      user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+      // Cashwyre's card code; null until the card has been created.
+      cardCode: { type: String, default: null, index: { unique: true, partialFilterExpression: { cardCode: { $type: 'string' } } } },
+      status: { type: String, enum: ['creating', 'active', 'frozen', 'terminated', 'failed'], default: 'creating', index: true },
+      brand: { type: String, default: 'Visa' },
+      name: { type: String, default: '' },
+      last4: { type: String, default: null },
+      validMonthYear: { type: String, default: null },
+      balanceUsd: { type: Number, default: 0 }, // cents
+      createTransaction: { type: Schema.Types.ObjectId, ref: 'Transaction', default: null },
+      lastSyncedAt: { type: Date, default: null },
+      failureReason: { type: String, default: null },
+    },
+    { timestamps: true },
+  ),
+);
+
 module.exports = {
+  Card,
   User,
   Transaction,
   Notification,

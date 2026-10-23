@@ -29,10 +29,20 @@ const SERVICES = [
   'transfer',
   ...SL_SERVICES,
   'sl_transfer',
+  // Cashwyre: transfers to banks / mobile money in other countries, and
+  // virtual dollar cards (each country has its own switch and limits).
+  'payout',
+  'sl_payout',
+  'card',
+  'sl_card',
 ];
 
 const TRANSFER_SERVICES = ['transfer', 'sl_transfer'];
-const BILL_SERVICES = SERVICES.filter((s) => !TRANSFER_SERVICES.includes(s));
+const CASHWYRE_SERVICES = ['payout', 'sl_payout', 'card', 'sl_card'];
+const BILL_SERVICES = SERVICES.filter((s) => !TRANSFER_SERVICES.includes(s) && !CASHWYRE_SERVICES.includes(s));
+
+/** Transaction types for dollar cards. */
+const CARD_TXN_TYPES = ['card_create', 'card_topup', 'card_withdrawal'];
 
 /** Which country a service belongs to. */
 const countryOfService = (service) => (String(service || '').startsWith('sl_') ? 'SL' : 'NG');
@@ -54,6 +64,10 @@ const SERVICE_LABELS = {
   sl_electricity: 'EDSA Electricity',
   sl_cable: 'Cable TV (Sierra Leone)',
   sl_transfer: 'Money Transfer (Sierra Leone)',
+  payout: 'Bank & Mobile Money Transfer',
+  sl_payout: 'Bank & Mobile Money Transfer (Sierra Leone)',
+  card: 'Dollar Card',
+  sl_card: 'Dollar Card (Sierra Leone)',
 };
 
 const TXN_TYPES = [
@@ -67,11 +81,13 @@ const TXN_TYPES = [
   'refund',
   'admin_credit',
   'admin_debit',
+  'payout', // bank / mobile money transfer through Cashwyre
+  ...CARD_TXN_TYPES,
 ];
 
 const TXN_STATUSES = ['pending', 'success', 'failed', 'refunded', 'disputed'];
 
-const NOTIFICATION_KINDS = ['payment', 'wallet', 'promo', 'security', 'general', 'commission', 'referral'];
+const NOTIFICATION_KINDS = ['payment', 'wallet', 'promo', 'security', 'general', 'commission', 'referral', 'card'];
 
 const DISPUTE_TYPES = [
   'service_not_delivered',
@@ -91,6 +107,8 @@ module.exports = {
   CURRENCIES,
   SL_SERVICES,
   TRANSFER_SERVICES,
+  CASHWYRE_SERVICES,
+  CARD_TXN_TYPES,
   countryOfService,
   servicesFor,
   SERVICES,

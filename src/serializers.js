@@ -171,4 +171,19 @@ function limits(l) {
   };
 }
 
-module.exports = { id, user, userBrief, transaction, notification, dispute, alert, limits };
+/** A dollar card (never the full number or CVV). */
+function card(c) {
+  if (!c) return null;
+  return {
+    id: id(c),
+    status: c.status,
+    brand: c.brand,
+    name: c.name,
+    last4: c.last4 || null,
+    validMonthYear: c.validMonthYear || null,
+    balanceUsd: toNaira(c.balanceUsd || 0),
+    createdAt: c.createdAt,
+  };
+}
+
+module.exports = { id, user, userBrief, transaction, notification, dispute, alert, limits, card };

@@ -124,6 +124,32 @@ const env = {
     timeoutMs: Number(process.env.VTPASS_TIMEOUT_MS || 45000),
   },
   webhookSecret: process.env.WEBHOOK_SECRET || (isProd ? '' : 'dev-webhook-secret'),
+
+  // Cashwyre (https://business.cashwyre.com/doc/api): bank and mobile
+  // money transfers to other countries, and virtual dollar cards.
+  //   CASHWYRE_SECRET_KEY     Settings → API keys (secret key)
+  //   CASHWYRE_BUSINESS_CODE  Settings → business code (also the appId)
+  //   CASHWYRE_WEBHOOK_TOKEN  any long random text you choose; the webhook
+  //                           URL you give Cashwyre ends with it
+  //   CASHWYRE_FX_FALLBACK    optional "NGN=1600,SLE=24" ($1 in each
+  //                           currency) used when Cashwyre has no rate
+  cashwyre: {
+    secretKey: clean(process.env.CASHWYRE_SECRET_KEY),
+    businessCode: clean(process.env.CASHWYRE_BUSINESS_CODE),
+    baseUrl: clean(process.env.CASHWYRE_BASE_URL) || 'https://businessapi.cashwyre.com/api/v1.0',
+    webhookToken: clean(process.env.CASHWYRE_WEBHOOK_TOKEN),
+    // Wallet Cashwyre debits for transfers in another currency than the
+    // sender's (USD by default).
+    crossBorderWallet: clean(process.env.CASHWYRE_CROSS_BORDER_WALLET) || 'USD',
+    fxFallback: Object.fromEntries(
+      clean(process.env.CASHWYRE_FX_FALLBACK)
+        .split(',')
+        .map((p) => p.split('=').map((s) => s.trim()))
+        .filter(([k, v]) => k && Number(v) > 0)
+        .map(([k, v]) => [k.toUpperCase(), Number(v)]),
+    ),
+    timeoutMs: Number(process.env.CASHWYRE_TIMEOUT_MS || 45000),
+  },
 };
 
 env.warnings = startupWarnings;
