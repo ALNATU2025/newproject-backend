@@ -14,7 +14,7 @@ const { raiseAlert } = require('../services/alerts');
 const { notify } = require('../services/notify');
 const { creditDeposit } = require('../services/funding');
 const { findRecipient, executeTransfer } = require('../services/transfer');
-const { fmt } = require('../services/limits');
+const { fmt, assertCanTransact } = require('../services/limits');
 const serialize = require('../serializers');
 
 const router = express.Router();
@@ -145,6 +145,8 @@ router.get(
   '/sl-funding',
   asyncHandler(async (req, res) => {
     if (!isSl(req)) throw forbidden('This is for Sierra Leone accounts.', 'WRONG_COUNTRY');
+    // Pending accounts can't transact, top-ups included.
+    assertCanTransact(req.user, await getSettings());
     const f = (await getSettings()).slFunding;
     ok(res, {
       currency: 'SLE',
