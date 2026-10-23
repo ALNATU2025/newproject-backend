@@ -16,9 +16,14 @@ function createApp() {
   app.use(helmet());
   app.use(
     cors({
-      // Mobile apps send no Origin header; browsers must be on the list.
+      // Mobile apps send no Origin header; browsers must be on the list
+      // (CORS_ORIGINS). The app running in Chrome on your own computer
+      // (flutter run -d chrome → http://localhost:<port>) is always allowed.
+      // Login uses a Bearer token, not cookies, so this can't be abused
+      // by other websites.
       origin: (origin, cb) => {
         if (!origin || env.corsOrigins.includes('*') || env.corsOrigins.includes(origin)) return cb(null, true);
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return cb(null, true);
         return cb(null, false);
       },
     }),

@@ -173,3 +173,26 @@ describe('adding money in Sierra Leone', () => {
     expect(ng.recentTransactions.every((x) => x.currency === 'NGN')).toBe(true);
   });
 });
+
+describe('login with a country', () => {
+  test('country picked at login must match the account', async () => {
+    const s = await signUp({ country: 'SL', phone: '079123456' });
+    const ok = await api().post('/api/auth/login').send({ identifier: '79 123 456', password: s.password, country: 'SL' });
+    expect(ok.status).toBe(200);
+    const wrong = await api().post('/api/auth/login').send({ identifier: s.email, password: s.password, country: 'NG' });
+    expect(wrong.status).toBe(401);
+    expect(wrong.body.code).toBe('WRONG_COUNTRY');
+    expect(wrong.body.message).toMatch(/Sierra Leone/);
+  });
+
+  test('the app in Chrome on localhost is allowed (CORS)', async () => {
+    const r = await api().options('/api/auth/login')
+      .set('Origin', 'http://localhost:51607')
+      .set('Access-Control-Request-Method', 'POST');
+    expect(r.headers['access-control-allow-origin']).toBe('http://localhost:51607');
+    const other = await api().options('/api/auth/login')
+      .set('Origin', 'https://evil.example')
+      .set('Access-Control-Request-Method', 'POST');
+    expect(other.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});

@@ -13,7 +13,7 @@ const pinService = require('../services/pin');
 const { raiseAlert } = require('../services/alerts');
 const { notify } = require('../services/notify');
 const serialize = require('../serializers');
-const { COUNTRY_CODES } = require('../models/constants');
+const { COUNTRY_CODES, COUNTRIES } = require('../models/constants');
 const { normalizePhone, anyLocal, PHONE_HINT, toE164 } = require('../utils/phone');
 const { verifyIdToken } = require('../services/firebase');
 
@@ -188,11 +188,15 @@ router.post(
     body: z.object({
       identifier: z.string().trim().min(3, 'Enter your email or phone number').max(100),
       password: z.string().min(1, 'Enter your password').max(100),
+      // The country picked on the login screen (optional for older apps).
+      country: z.enum(COUNTRY_CODES).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
     const id = req.body.identifier.toLowerCase();
-    const query = id.includes('@') ? { email: id } : { phone: anyLocal(id) };
+    const { country } = req.body;
+    const phone = country ? normalizePhone(id, country) || anyLocal(id) : anyLocal(id);
+    const query = id.includes('@') ? { email: id } : { phone };
     const user = await User.findOne(query).select('+passwordHash');
     if (user && !user.passwordHash) {
       // A record left by another app in the same database (no passwordHash).
@@ -205,6 +209,10 @@ router.post(
     if (!okPassword) throw unauthorized('Incorrect email/phone or password.', 'INVALID_CREDENTIALS');
     if (!user.isActive) {
       throw forbidden('Your account has been deactivated. Please contact support.', 'ACCOUNT_DISABLED');
+    }
+    if (country && (user.country || 'NG') !== country) {
+      const name = COUNTRIES[user.country || 'NG'].name;
+      throw unauthorized(`This account is registered in ${name}. Select ${name} to log in.`, 'WRONG_COUNTRY');
     }
     user.lastLoginAt = new Date();
     await user.save();
