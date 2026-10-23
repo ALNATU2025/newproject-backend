@@ -80,7 +80,7 @@ router.post(
     const data = pick(req.body || {}, 'eventData') || {};
     let result = { ignored: true };
     try {
-      if (eventType.startsWith('payout.')) result = await payouts.onPayoutEvent(data);
+      if (eventType.startsWith('payout.')) result = await payouts.onPayoutEvent(data, eventType);
       else if (eventType.startsWith('virtualcard.')) result = await cards.onCardEvent(eventType, data);
     } catch (e) {
       // Cashwyre doesn't retry; the sweeper will pick it up.

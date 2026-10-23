@@ -40,6 +40,7 @@ async function sweepOnce({ now = Date.now(), limit = 25 } = {}) {
         });
       }
     } catch (e) {
+      if (process.env.NODE_ENV !== 'test') console.warn(`[sweeper] ${t.reference} (${t.type}) check failed: ${e.message}`);
       results.push('error');
     }
   }

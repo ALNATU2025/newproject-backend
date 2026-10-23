@@ -147,7 +147,11 @@ async function initiatePayout(p) {
     Amount: p.amount,
     ...(p.debitWalletCurrency ? { DebitWalletCurrency: p.debitWalletCurrency } : {}),
   });
-  return { transactionReference: pick(d, 'transactionReference') || null, reference: pick(d, 'reference') || p.reference };
+  if (!env.isTest) console.log(`[cashwyre] payout ${p.reference} initiated: ${JSON.stringify(d)}`);
+  return {
+    transactionReference: pick(d, 'transactionReference', 'transactionRef', 'txnReference', 'code') || null,
+    reference: pick(d, 'reference') || p.reference,
+  };
 }
 
 /** 'success' | 'failed' | 'pending' (+ the provider's message). */
@@ -159,9 +163,15 @@ function payoutState(raw) {
 }
 
 async function payoutStatus({ reference, transactionReference }) {
-  const d = await call('Payout/getPayoutStatus', { reference, transactionReference: transactionReference || '' });
+  let d = await call('Payout/getPayoutStatus', { reference, transactionReference: transactionReference || '' });
+  if (Array.isArray(d)) [d] = d;
+  const raw = pick(d || {}, 'status', 'transactionStatus', 'paymentStatus');
+  let status = payoutState(raw);
+  const msg = String(pick(d || {}, 'message') || '').toLowerCase();
+  if (status === 'pending' && !raw && /successful/.test(msg)) status = 'success';
+  if (!env.isTest) console.log(`[cashwyre] payout ${reference} status: ${raw || '?'} → ${status}`);
   return {
-    status: payoutState(pick(d, 'status')),
+    status,
     message: pick(d, 'message') || null,
     bankName: pick(d, 'bankName') || null,
   };

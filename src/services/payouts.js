@@ -434,11 +434,18 @@ async function send(user, { quoteToken, pin }) {
       currency: q.currency,
       country: q.country,
       amount: q.amount,
-      narration: (q.narration || `Dalabapay transfer ${reference}`).slice(0, 100),
+      // Our reference always goes first so a webhook can be matched by it.
+      narration: `${reference} ${q.narration || 'Dalabapay transfer'}`.slice(0, 100),
       debitWalletCurrency: q.debitWallet !== undefined ? q.debitWallet : debitWalletFor(q.currency, cur),
     });
     txn.providerReference = r.transactionReference;
     await txn.save();
+    // Some payouts finish straight away: check once now.
+    try {
+      await checkPayout(await Transaction.findById(txn._id));
+    } catch {
+      // the webhook or the sweeper will settle it
+    }
   } catch (e) {
     if (e instanceof AppError) {
       txn.metadata = { ...txn.metadata, failureReason: e.message };
@@ -506,21 +513,57 @@ async function checkPayout(txn, { actor = null } = {}) {
   return { result: r.status, message: r.message };
 }
 
-/** Webhook payout.success / payout.failed: confirmed with Cashwyre first. */
-async function onPayoutEvent(eventData) {
-  const ref = cashwyre.pick(eventData, 'reference');
-  const txRef = cashwyre.pick(eventData, 'transactionReference');
-  const txn = await Transaction.findOne({
-    type: 'payout',
-    $or: [{ reference: ref || '__none__' }, ...(txRef ? [{ providerReference: txRef }] : [])],
-  });
+const digits = (v) => String(v || '').replace(/\D/g, '');
+
+/** Finds our payout for a webhook: by reference, by Cashwyre's, or by narration. */
+async function findPayoutFor(eventData) {
+  const pick = (...k) => cashwyre.pick(eventData, ...k);
+  const refs = [pick('reference'), pick('transactionReference'), pick('requestId'), pick('code')].filter(Boolean).map(String);
+  const narration = String(pick('narration', 'transactionDescription') || '');
+  const fromNarration = (narration.match(/PO\d{12}[0-9A-F]{8}/) || [])[0];
+  if (fromNarration) refs.push(fromNarration);
+  if (!refs.length) return null;
+  return Transaction.findOne({ type: 'payout', $or: [{ reference: { $in: refs } }, { providerReference: { $in: refs } }] });
+}
+
+/** True when the webhook describes this payout (same account and amount). */
+function detailsMatch(txn, eventData) {
+  const m = txn.metadata || {};
+  const acct = digits(cashwyre.pick(eventData, 'destinationAccountNumber', 'accountNumber'));
+  const amount = Number(cashwyre.pick(eventData, 'amount'));
+  const sameAccount = acct && digits(m.accountNumber).endsWith(acct.slice(-6));
+  const sameAmount = Number.isFinite(amount) && Math.abs(amount - Number(m.sendAmount)) < 0.01;
+  return Boolean(sameAccount && sameAmount);
+}
+
+/**
+ * Webhook payout.success / payout.failed. Confirmed with Cashwyre's status
+ * check; if that can't answer, the webhook is accepted only when its
+ * account number and amount match the payout (the URL is secret too).
+ */
+async function onPayoutEvent(eventData, eventType = '') {
+  const txn = await findPayoutFor(eventData);
+  if (!env.isTest) console.log(`[cashwyre webhook] ${eventType} ${JSON.stringify(eventData).slice(0, 600)} → ${txn ? txn.reference : 'no match'}`);
   if (!txn) return { matched: false };
-  if (!txn.providerReference && txRef) {
-    txn.providerReference = txRef;
+  const txRef = cashwyre.pick(eventData, 'transactionReference');
+  if (!txn.providerReference && txRef && String(txRef) !== txn.reference) {
+    txn.providerReference = String(txRef);
     await txn.save();
   }
-  const r = await checkPayout(txn);
-  return { matched: true, result: r.result };
+  if (txn.status !== 'pending') return { matched: true, result: txn.status };
+  let r = null;
+  try {
+    r = await checkPayout(txn);
+  } catch (e) {
+    r = null;
+  }
+  if (r && r.result !== 'pending') return { matched: true, result: r.result };
+  const said = cashwyre.payoutState(cashwyre.pick(eventData, 'status') || (String(eventType).endsWith('success') ? 'success' : String(eventType).endsWith('failed') ? 'failed' : ''));
+  if (said !== 'pending' && detailsMatch(txn, eventData)) {
+    await settle(txn, said, cashwyre.pick(eventData, 'transactionDescription') || null);
+    return { matched: true, result: said, via: 'webhook' };
+  }
+  return { matched: true, result: 'pending' };
 }
 
 module.exports = {

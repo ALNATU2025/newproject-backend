@@ -303,6 +303,39 @@ describe('transfers', () => {
     }
   });
 
+  test('webhook with Cashwyre\'s own reference settles the transfer when the status check can\'t answer', async () => {
+    const u = await user('SL', 2000);
+    const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
+      country: 'NG', accountType: 'bank', bankCode: '0014', accountNumber: '8174538389', amount: 300,
+    });
+    expect(q.status).toBe(200);
+    await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
+    const init = calls.find((c) => c.path === 'Payout/initiate').body;
+    expect(init.Narration.startsWith(init.Reference)).toBe(true);
+    const t = await Transaction.findOne({ reference: init.Reference });
+    expect(t.status).toBe('pending');
+
+    // The status check fails; the webhook carries Cashwyre's reference.
+    delete statuses[init.Reference];
+    const realFetch = fakeCashwyre;
+    cashwyre.setFetch(async (url, opts) => (url.endsWith('Payout/getPayoutStatus')
+      ? { ok: false, status: 404, json: async () => ({ success: false, message: 'Not found' }) }
+      : realFetch(url, opts)));
+    try {
+      const wrong = await hook('payout.success', {
+        reference: 'oVC8I70dhLtY1B', transactionReference: 'oVC8I70dhLtY1B', amount: 999, destinationAccountNumber: '8174538389', narration: init.Narration, status: 'success',
+      });
+      expect(wrong.body.data.result).toBe('pending'); // amount doesn't match
+      const h = await hook('payout.success', {
+        reference: 'oVC8I70dhLtY1B', transactionReference: 'oVC8I70dhLtY1B', amount: 300, destinationAccountNumber: '8174538389', narration: init.Narration, status: 'success',
+      });
+      expect(h.body.data).toEqual(expect.objectContaining({ result: 'success', via: 'webhook' }));
+    } finally {
+      cashwyre.setFetch(realFetch);
+    }
+    expect((await Transaction.findById(t._id)).status).toBe('success');
+  });
+
   test('webhook with the wrong secret is ignored', async () => {
     const r = await hook('payout.success', { reference: 'x' }, 'wrong-token-wrong-token');
     expect(r.status).toBe(404);
