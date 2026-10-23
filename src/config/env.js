@@ -25,6 +25,7 @@ function signupMethod(value, fallback) {
     clean(process.env.TWILIO_ACCOUNT_SID) && clean(process.env.TWILIO_AUTH_TOKEN) && clean(process.env.TWILIO_VERIFY_SERVICE_SID),
   );
   if (v === 'twilio' && twilio) return 'twilio';
+  if (v === 'firebase' && firebase) return 'firebase';
   if ((v === 'sms' || v === 'email_link') && firebase) return v;
   if (v === 'email') return 'email';
   return fallback;
@@ -79,6 +80,8 @@ const env = {
 
   // Sign-up verification (SIGNUP_VERIFICATION, per country with
   // SL_SIGNUP_VERIFICATION):
+  //   firebase   the person chooses: SMS code (Firebase Phone Auth) or
+  //              email link (Firebase) — no other service needed
   //   twilio     6-digit SMS code sent and checked by Twilio Verify (server)
   //   email_link Firebase emails a verification link
   //   sms        6-digit SMS code by Firebase Phone Auth (in the app)

@@ -125,3 +125,29 @@ test('without a pending sign-up nothing is created', async () => {
     .send({ email: 'nobody@example.com', idToken: firebaseToken('+2348030000005') });
   expect(v.body.code).toBe('CODE_EXPIRED');
 });
+
+describe('choice: SMS or email, both through Firebase', () => {
+  beforeAll(() => {
+    env.signupVerification = 'firebase';
+    env.slSignupVerification = 'firebase';
+  });
+
+  test('register offers both, for either country', async () => {
+    const ng = await api().post('/api/auth/register').send(details(9));
+    expect(ng.body.data).toEqual(expect.objectContaining({ verification: 'choose', options: ['sms', 'email_link'], phoneE164: '+2348030000009' }));
+    const sl = await api().post('/api/auth/register').send(details(0, { phone: '073952700', country: 'SL', email: 'choice0@example.com' }));
+    expect(sl.body.data.verification).toBe('choose');
+  });
+
+  test('either proof finishes the sign-up', async () => {
+    await api().post('/api/auth/register').send(details(1, { phone: '08030000011', email: 'choice1@example.com' }));
+    const bySms = await api().post('/api/auth/register/verify-phone')
+      .send({ email: 'choice1@example.com', idToken: firebaseToken('+2348030000011') });
+    expect(bySms.status).toBe(201);
+    await api().post('/api/auth/register').send(details(2, { phone: '073952712', country: 'SL', email: 'choice2@example.com' }));
+    const byEmail = await api().post('/api/auth/register/verify-email-link')
+      .send({ email: 'choice2@example.com', idToken: firebaseToken(null, { email: 'choice2@example.com', emailVerified: true }) });
+    expect(byEmail.status).toBe(201);
+  });
+});
+

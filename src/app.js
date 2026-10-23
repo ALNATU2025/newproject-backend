@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const env = require('./config/env');
 
 const VERIFY_LABEL = {
+  firebase: 'choice: sms or email link (Firebase)',
   twilio: 'sms code (Twilio)',
   email_link: 'email link (Firebase)',
   sms: 'sms (Firebase)',

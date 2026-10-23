@@ -80,6 +80,18 @@ router.post(
     const passwordHash = await bcrypt.hash(password, 10);
     const payload = { fullName, email, phone, passwordHash, referrerId, country };
     const method = verificationFor(country);
+    if (method === 'firebase') {
+      // The person picks SMS or email in the app; Firebase sends it and the
+      // app comes back with /register/verify-phone or /verify-email-link.
+      await otp.savePending(email, 'register', payload);
+      return ok(res, {
+        email,
+        verification: 'choose',
+        options: ['sms', 'email_link'],
+        phoneE164: toE164(phone, country),
+        message: 'Choose how to verify your account.',
+      });
+    }
     if (method === 'twilio') {
       // Our server texts the code (Twilio Verify); the app shows the code
       // boxes and comes back with /register/verify-sms.
