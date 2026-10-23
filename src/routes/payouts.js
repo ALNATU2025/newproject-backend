@@ -33,19 +33,21 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await payouts.bankList(req.query.country, req.query.type))),
 );
 
-/** Account holder's name, where the country supports it. */
+/** Account holder's name, where the bank / provider supports it. */
 router.post(
   '/lookup',
   validate({ body: z.object({ country, bankCode: z.string().trim().min(1), accountNumber }) }),
   asyncHandler(async (req, res) => {
-    let accountName = null;
-    try {
-      accountName = await cashwyre.accountLookup(req.body);
-    } catch {
-      accountName = null;
-    }
-    ok(res, { accountName, supported: Boolean(accountName) });
+    const r = await payouts.lookupName(req.body);
+    ok(res, { ...r, supported: r.verified });
   }),
+);
+
+/** Fee and rate preview while the customer types the amount. */
+router.post(
+  '/fee',
+  validate({ body: z.object({ country, amount: fields.amount, accountType: accountType.optional() }) }),
+  asyncHandler(async (req, res) => ok(res, await payouts.preview(req.user, req.body))),
 );
 
 /** What the transfer costs in the sender's currency, with a 10-minute quote. */
@@ -57,7 +59,7 @@ router.post(
       accountType,
       bankCode: z.string().trim().min(1),
       accountNumber,
-      accountName: z.string().trim().min(2, 'Enter the account holder\'s name').max(100),
+      accountName: z.string().trim().min(2, 'Enter the account holder\'s name').max(100).optional(),
       amount: fields.amount,
       narration: z.string().trim().max(100).optional(),
     }),

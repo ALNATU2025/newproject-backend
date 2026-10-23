@@ -98,6 +98,11 @@ async function fakeCashwyre(url, opts) {
     }
     case 'CustomerCard/getCardTransactions':
       return reply({ Success: true, Message: 'Result successful', CardTransactions: cardByCode(b.cardCode).history });
+    case 'Account/accountLookup':
+      // Nigerian banks and Orange Money SL check names; others don't.
+      if (b.country === 'NG') return okData({ accountName: 'BAD ACCOUNT' });
+      if (b.bankCode === 'OrangeMoney_SL' && b.accountNumber === '076123456') return okData({ accountName: 'FATMATA KAMARA' });
+      return reply({ success: false, message: 'Account lookup not supported for this bank' }, 400);
     case 'Wallet/getFundwalletAccountInfo':
       if (bizWallets[b.currency] === undefined) return reply({ success: false, message: 'Wallet not found' }, 400);
       return okData({ currency: b.currency, availableBalance: bizWallets[b.currency] });
@@ -225,6 +230,34 @@ describe('transfers', () => {
     });
     expect(r.status).toBe(400);
     expect(r.body.code).toBe('METHOD_NOT_SUPPORTED');
+  });
+
+  test('account name fills in from the provider; fees and rates are shown before paying', async () => {
+    const u = await user('SL', 2000);
+    const look = await api().post('/api/payouts/lookup').set(auth(u.token)).send({ country: 'SL', bankCode: 'OrangeMoney_SL', accountNumber: '076123456' });
+    expect(look.body.data).toEqual(expect.objectContaining({ accountName: 'FATMATA KAMARA', verified: true }));
+    const none = await api().post('/api/payouts/lookup').set(auth(u.token)).send({ country: 'GH', bankCode: 'GCB', accountNumber: '1234567890' });
+    expect(none.body.data).toEqual(expect.objectContaining({ accountName: null, verified: false }));
+
+    // Same currency: Le 500 + Cashwyre's Le 10 fee + 1% Dalabapay fee
+    const local = await api().post('/api/payouts/fee').set(auth(u.token)).send({ country: 'SL', amount: 500 });
+    expect(local.body.data).toEqual(expect.objectContaining({ total: 515.1, dalabapayFee: 5.1, amountInYourCurrency: 500, rate: null }));
+    expect(local.body.data.cashwyre).toEqual(expect.objectContaining({ fee: 10, feeCurrency: 'SLE', feeInYourCurrency: 10, wallet: 'SLE', totalDebit: 510 }));
+
+    // Cross-border: GHS 100 costs $7.50 at Cashwyre (GHS 3 of it is their fee)
+    const gh = await api().post('/api/payouts/fee').set(auth(u.token)).send({ country: 'GH', amount: 100 });
+    expect(gh.body.data).toEqual(expect.objectContaining({ total: 185.44, usdRate: 24 }));
+    expect(gh.body.data.cashwyre).toEqual(expect.objectContaining({ fee: 3, feeCurrency: 'GHS', wallet: 'GHS', totalDebit: 103 }));
+    const b = gh.body.data;
+    expect(b.amountInYourCurrency + b.cashwyre.feeInYourCurrency + b.dalabapayFee).toBeCloseTo(185.44, 2);
+
+    // The quote uses the provider's name, whatever was typed.
+    const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
+      country: 'SL', accountType: 'mobile_money', bankCode: 'OrangeMoney_SL', accountNumber: '076123456', amount: 50,
+    });
+    expect(q.status).toBe(200);
+    expect(q.body.data).toEqual(expect.objectContaining({ accountName: 'FATMATA KAMARA', nameVerified: true }));
+    expect(q.body.data.breakdown.total).toBe(q.body.data.charge);
   });
 
   test('a country\'s wallet too low: refused before any money moves, admins told to fund it', async () => {

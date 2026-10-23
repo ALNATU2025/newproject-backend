@@ -125,6 +125,9 @@ async function payoutFee({ currency, amount, accountNumber = '' }) {
     totalDebitLocal: Number(pick(d, 'totalDebitAmount') || 0),
     totalDebitUsd: Number(pick(d, 'totalDebitInUSD') || 0),
     fxRate: Number(pick(d, 'fxRate') || 0),
+    fxRateInfo: pick(d, 'fxRateInfo') || null,
+    feeUsd: Number(pick(d, 'baseFee') || 0),
+    feeInfo: pick(d, 'feeInfo') || null,
     info: pick(d, 'totalDebitAmountInfo') || null,
   };
 }

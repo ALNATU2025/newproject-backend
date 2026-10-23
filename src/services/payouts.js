@@ -216,6 +216,86 @@ async function checks(user, charge) {
  * Works out what a transfer costs the sender. [amount] is what the
  * recipient gets, in the recipient country's currency (major units).
  */
+/**
+ * What a transfer of [amount] (recipient's currency) costs the sender, and
+ * where the money goes: Cashwyre's fee and rate, Dalabapay's fee.
+ */
+async function price(user, dest, { amount, accountNumber = '' }, settings) {
+  const fee = await cashwyre.payoutFee({ currency: dest.currency, amount, accountNumber });
+  const userCur = currencyOf(user.country);
+  const debitWallet = debitWalletFor(dest.currency, userCur);
+  const walletCurrency = debitWallet || dest.currency;
+  const totalLocal = fee.totalDebitLocal > 0 ? fee.totalDebitLocal : amount + fee.feeLocal;
+  // What leaves your Cashwyre wallet: the amount plus Cashwyre's fee.
+  const needed = walletCurrency === dest.currency ? totalLocal : walletCurrency === 'USD' ? fee.totalDebitUsd : 0;
+
+  const pricing = settings.cashwyre || {};
+  let cost; // Cashwyre's total, in the sender's currency
+  let perUsd = null;
+  let cashwyreFeeSender; // Cashwyre's fee, in the sender's currency
+  if (userCur === dest.currency) {
+    cost = totalLocal;
+    cashwyreFeeSender = fee.feeLocal;
+  } else {
+    if (!(fee.totalDebitUsd > 0)) throw unavailable('We couldn\'t price this transfer right now. Please try again.', 'FX_UNAVAILABLE');
+    perUsd = await usdRate(userCur, 'sell');
+    cost = fee.totalDebitUsd * perUsd;
+    cashwyreFeeSender = fee.feeUsd > 0 ? fee.feeUsd * perUsd : totalLocal > 0 ? (fee.feeLocal / totalLocal) * cost : 0;
+  }
+  const withFx = userCur === dest.currency ? cost : cost * (1 + (pricing.fxMarginPercent || 0) / 100);
+  const charge = roundUp(withFx * (1 + (pricing.payoutFeePercent || 0) / 100));
+  const cashwyreFee = roundUp(cashwyreFeeSender);
+  const sent = roundUp(Math.max(0, cost - cashwyreFeeSender)); // the recipient's amount, in the sender's currency
+  const ourFee = Math.max(0, charge - sent - cashwyreFee);
+  const breakdown = {
+    sendAmount: amount,
+    sendCurrency: dest.currency,
+    chargeCurrency: userCur,
+    amountInYourCurrency: sent / 100,
+    cashwyre: {
+      fee: fee.feeLocal,
+      feeCurrency: dest.currency,
+      feeInYourCurrency: cashwyreFee / 100,
+      feeUsd: fee.feeUsd || null,
+      totalDebit: walletCurrency === 'USD' ? fee.totalDebitUsd : totalLocal,
+      wallet: walletCurrency,
+      rate: fee.fxRate || null, // units of the recipient's currency per $1
+      rateInfo: fee.fxRateInfo,
+    },
+    dalabapayFee: ourFee / 100,
+    rate: userCur === dest.currency ? null : withFx / amount, // sender's currency per 1 unit of the recipient's
+    usdRate: perUsd, // sender's currency per $1
+    total: charge / 100,
+  };
+  return { fee, charge, debitWallet, walletCurrency, needed, breakdown, userCur };
+}
+
+/** Fee preview while the customer types (no account details needed). */
+async function preview(user, { country, amount, accountType }) {
+  const settings = await checks(user);
+  const dest = await findCountry(country);
+  if (accountType === 'bank' && dest.bank === false) throw badRequest(`Bank transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
+  if (accountType === 'mobile_money' && dest.mobileMoney === false) {
+    throw badRequest(`Mobile money transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
+  }
+  const p = await price(user, dest, { amount }, settings);
+  return p.breakdown;
+}
+
+/** The account holder's name from the bank / mobile money provider. */
+async function lookupName({ country, bankCode, accountNumber }) {
+  try {
+    const name = await cashwyre.accountLookup({ country, bankCode, accountNumber });
+    return name ? { accountName: String(name).trim(), verified: true } : { accountName: null, verified: false };
+  } catch (e) {
+    return { accountName: null, verified: false, message: e instanceof AppError && e.code === 'PROVIDER_DECLINED' ? e.message : null };
+  }
+}
+
+/**
+ * Works out what a transfer costs the sender. [amount] is what the
+ * recipient gets, in the recipient country's currency (major units).
+ */
 async function quote(user, { country, accountType, bankCode, accountNumber, accountName, amount, narration }) {
   const settings = await checks(user);
   const dest = await findCountry(country);
@@ -224,31 +304,24 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
     throw badRequest(`Mobile money transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
   }
   const bank = await findBank(country, accountType, bankCode);
-  const fee = await cashwyre.payoutFee({ currency: dest.currency, amount, accountNumber });
 
-  const userCur = currencyOf(user.country);
-  const debitWallet = debitWalletFor(dest.currency, userCur);
-  const walletCurrency = debitWallet || dest.currency;
-  // What leaves that wallet: the amount plus Cashwyre's fee.
-  const needed = walletCurrency === dest.currency
-    ? fee.totalDebitLocal > 0 ? fee.totalDebitLocal : amount + fee.feeLocal
-    : walletCurrency === 'USD' ? fee.totalDebitUsd : 0;
-  await assertBusinessFunds(dest, walletCurrency, needed);
-  const pricing = settings.cashwyre || {};
-  let base; // in the sender's currency (major units)
-  let rate = null; // sender's currency per 1 unit of the recipient's
-  if (userCur === dest.currency) {
-    base = fee.totalDebitLocal > 0 ? fee.totalDebitLocal : amount + fee.feeLocal;
-  } else {
-    if (!(fee.totalDebitUsd > 0)) throw unavailable('We couldn\'t price this transfer right now. Please try again.', 'FX_UNAVAILABLE');
-    const perUsd = await usdRate(userCur, 'sell');
-    base = fee.totalDebitUsd * perUsd * (1 + (pricing.fxMarginPercent || 0) / 100);
-    rate = base / amount;
+  // Banks that check names: always use the name the bank returns.
+  let name = accountName;
+  let nameVerified = false;
+  const looked = await lookupName({ country, bankCode: bank.code, accountNumber });
+  if (looked.verified) {
+    name = looked.accountName;
+    nameVerified = true;
+  } else if (bank.nameEnquiryRequired) {
+    throw badRequest('We couldn\'t confirm this account number with the bank. Check it and try again.', 'ACCOUNT_NOT_VERIFIED');
   }
-  const charge = roundUp(base * (1 + (pricing.payoutFeePercent || 0) / 100));
+  if (!name || name.length < 2) throw badRequest('Enter the account holder\'s name.', 'ACCOUNT_NAME_REQUIRED');
+
+  const p = await price(user, dest, { amount, accountNumber }, settings);
+  await assertBusinessFunds(dest, p.walletCurrency, p.needed);
+  const { charge, debitWallet, walletCurrency, needed, userCur } = p;
   await assertWithinLimits(user, serviceFor(user), charge, settings);
 
-  const fees = Math.max(0, charge - (userCur === dest.currency ? roundUp(amount) : 0));
   const q = {
     country: dest.code,
     countryName: dest.name,
@@ -257,7 +330,8 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
     bankCode: bank.code,
     bankName: bank.name,
     accountNumber,
-    accountName,
+    accountName: name,
+    nameVerified,
     narration: narration || null,
     amount,
     charge,
@@ -265,16 +339,17 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
     walletCurrency,
     needed,
     chargeCurrency: userCur,
-    rate,
+    rate: p.breakdown.rate,
   };
   const token = jwt.sign({ sub: String(user._id), q }, env.jwtSecret, { expiresIn: QUOTE_TTL, audience: 'payout-quote' });
   return {
     quoteToken: token,
     ...q,
     charge: charge / 100,
-    fee: userCur === dest.currency ? fees / 100 : null,
+    fee: userCur === dest.currency ? Math.max(0, charge / 100 - amount) : null,
+    breakdown: p.breakdown,
     expiresInSeconds: 600,
-    summary: `${dest.currency} ${amount.toFixed(2)} to ${accountName} (${bank.name}) costs ${formatMoney(charge, userCur)}`,
+    summary: `${dest.currency} ${amount.toFixed(2)} to ${name} (${bank.name}) costs ${formatMoney(charge, userCur)}`,
   };
 }
 
@@ -455,6 +530,8 @@ module.exports = {
   bankList,
   findCountry,
   quote,
+  preview,
+  lookupName,
   send,
   settle,
   checkPayout,
