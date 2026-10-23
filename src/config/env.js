@@ -73,6 +73,17 @@ const env = {
     clean(process.env.SIGNUP_VERIFICATION).toLowerCase() === 'sms' && clean(process.env.FIREBASE_PROJECT_ID)
       ? 'sms'
       : 'email',
+  // Sierra Leone sign-ups: "email_link" = Firebase emails a verification
+  // link (Firebase's SMS doesn't reach SL networks); "sms" = as Nigeria;
+  // "email" = 6-digit email code (Resend/SMTP). Default: email_link when
+  // Firebase is set up, otherwise email.
+  slSignupVerification: (() => {
+    const v = clean(process.env.SL_SIGNUP_VERIFICATION).toLowerCase();
+    const firebase = Boolean(clean(process.env.FIREBASE_PROJECT_ID));
+    if ((v === 'sms' || v === 'email_link') && firebase) return v;
+    if (v === 'email') return 'email';
+    return firebase ? 'email_link' : 'email';
+  })(),
 
   // Emails promoted to Super Admin at start-up and when they sign up
   // (for hosts without a shell). Comma-separated.

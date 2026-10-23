@@ -78,7 +78,18 @@ router.post(
     }
     const passwordHash = await bcrypt.hash(password, 10);
     const payload = { fullName, email, phone, passwordHash, referrerId, country };
-    if (env.signupVerification === 'sms') {
+    const method = verificationFor(country);
+    if (method === 'email_link') {
+      // The app has Firebase email the verification link and comes back
+      // with /register/verify-email-link once it's been tapped.
+      await otp.savePending(email, 'register', payload);
+      return ok(res, {
+        email,
+        verification: 'email_link',
+        message: `We'll email a verification link to ${email}.`,
+      });
+    }
+    if (method === 'sms') {
       // The app sends the SMS code through Firebase and comes back with
       // /register/verify-phone.
       await otp.savePending(email, 'register', payload);
@@ -93,6 +104,11 @@ router.post(
     ok(res, { email, verification: 'email', message: `We sent a 6-digit code to ${email}.`, ...extra });
   }),
 );
+
+/** How a sign-up from [country] is verified: sms | email_link | email. */
+function verificationFor(country) {
+  return country === 'SL' ? env.slSignupVerification : env.signupVerification;
+}
 
 /** Creates the account from saved sign-up details and logs in. */
 async function createAccount(p, { phoneVerified = false } = {}) {
@@ -145,6 +161,30 @@ router.post(
 );
 
 /**
+ * Step 2 (email link): Firebase emailed a verification link, the person
+ * tapped it, and the app sends the Firebase ID token. The token must be for
+ * the same email address, marked verified by Firebase.
+ */
+router.post(
+  '/register/verify-email-link',
+  validate({ body: z.object({ email: fields.email, idToken: z.string().min(20).max(5000) }) }),
+  asyncHandler(async (req, res) => {
+    const { email, idToken } = req.body;
+    const p = await otp.pendingPayload(email, 'register');
+    if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');
+    const claims = await verifyIdToken(idToken);
+    if (String(claims.email || '').toLowerCase() !== email) {
+      throw badRequest('This verification was for a different email address.', 'EMAIL_MISMATCH');
+    }
+    if (claims.email_verified !== true) {
+      throw badRequest('Your email isn\'t verified yet. Tap the link in the email first.', 'EMAIL_NOT_VERIFIED');
+    }
+    const user = await createAccount(p);
+    ok(res, session(user), 201);
+  }),
+);
+
+/**
  * Step 2 (SMS): the app verified the phone with Firebase (the person typed
  * the SMS code) and sends the Firebase ID token. The token must be for the
  * same phone number given at sign-up.
@@ -169,11 +209,12 @@ router.post(
   '/register/resend',
   validate({ body: z.object({ email: fields.email }) }),
   asyncHandler(async (req, res) => {
-    if (env.signupVerification === 'sms') {
-      // Firebase resends the SMS from the app; nothing to email.
-      const p = await otp.pendingPayload(req.body.email, 'register');
+    const p = await otp.pendingPayload(req.body.email, 'register');
+    const method = p ? verificationFor(p.country) : 'email';
+    if (method !== 'email') {
+      // Firebase resends the SMS / email link from the app.
       if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');
-      return ok(res, { verification: 'sms', phoneE164: toE164(p.phone, p.country) });
+      return ok(res, { verification: method, phoneE164: toE164(p.phone, p.country) });
     }
     const extra = await otp.issueCode(req.body.email, 'register');
     ok(res, { message: 'A new code is on its way.', verification: 'email', ...extra });

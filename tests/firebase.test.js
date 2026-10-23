@@ -15,9 +15,12 @@ const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
 });
 
 /** An ID token like Firebase issues after the SMS code is entered. */
-function firebaseToken(phone, { project = PROJECT, key = privateKey, kid = 'k1' } = {}) {
+function firebaseToken(phone, { project = PROJECT, key = privateKey, kid = 'k1', email, emailVerified } = {}) {
+  const claims = email
+    ? { email, email_verified: emailVerified, firebase: { sign_in_provider: 'password' } }
+    : { phone_number: phone, firebase: { sign_in_provider: 'phone' } };
   return jwt.sign(
-    { phone_number: phone, auth_time: Math.floor(Date.now() / 1000), firebase: { sign_in_provider: 'phone' } },
+    { ...claims, auth_time: Math.floor(Date.now() / 1000) },
     key,
     { algorithm: 'RS256', keyid: kid, audience: project, issuer: `https://securetoken.google.com/${project}`, subject: 'uid123', expiresIn: '1h' },
   );
@@ -26,6 +29,7 @@ function firebaseToken(phone, { project = PROJECT, key = privateKey, kid = 'k1' 
 beforeAll(() => {
   env.firebase.projectId = PROJECT;
   env.signupVerification = 'sms';
+  env.slSignupVerification = 'email_link';
   setCertFetcher(async () => ({
     ok: true,
     headers: { get: () => 'public, max-age=600' },
@@ -35,6 +39,7 @@ beforeAll(() => {
 afterAll(() => {
   env.firebase.projectId = '';
   env.signupVerification = 'email';
+  env.slSignupVerification = 'email';
 });
 
 const details = (n, extra = {}) => ({
@@ -62,13 +67,41 @@ test('a valid Firebase token for the same phone creates the account', async () =
   expect(v.body.data.user.phone).toBe('08030000002');
 });
 
-test('Sierra Leone numbers use +232', async () => {
+test('Sierra Leone numbers use +232 (when SL is set to SMS)', async () => {
+  env.slSignupVerification = 'sms';
   const r = await api().post('/api/auth/register').send(details(3, { phone: '076123403', country: 'SL' }));
   expect(r.body.data.phoneE164).toBe('+23276123403');
   const v = await api().post('/api/auth/register/verify-phone')
     .send({ email: 'sms3@example.com', idToken: firebaseToken('+23276123403') });
   expect(v.status).toBe(201);
   expect(v.body.data.user.country).toBe('SL');
+  env.slSignupVerification = 'email_link';
+});
+
+describe('Sierra Leone: Firebase email link', () => {
+  const sl = (n) => details(n, { phone: `07712340${n}`, country: 'SL', email: `link${n}@example.com` });
+
+  test('register asks for the email link; Nigeria still gets SMS', async () => {
+    const r = await api().post('/api/auth/register').send(sl(6));
+    expect(r.body.data.verification).toBe('email_link');
+    const ng = await api().post('/api/auth/register').send(details(7));
+    expect(ng.body.data.verification).toBe('sms');
+  });
+
+  test('verified email token creates the account', async () => {
+    await api().post('/api/auth/register').send(sl(8));
+    const notYet = await api().post('/api/auth/register/verify-email-link')
+      .send({ email: 'link8@example.com', idToken: firebaseToken(null, { email: 'link8@example.com', emailVerified: false }) });
+    expect(notYet.body.code).toBe('EMAIL_NOT_VERIFIED');
+    const other = await api().post('/api/auth/register/verify-email-link')
+      .send({ email: 'link8@example.com', idToken: firebaseToken(null, { email: 'someone@example.com', emailVerified: true }) });
+    expect(other.body.code).toBe('EMAIL_MISMATCH');
+    const v = await api().post('/api/auth/register/verify-email-link')
+      .send({ email: 'link8@example.com', idToken: firebaseToken(null, { email: 'Link8@example.com', emailVerified: true }) });
+    expect(v.status).toBe(201);
+    expect(v.body.data.user.country).toBe('SL');
+    expect(v.body.data.user.emailVerified).toBe(true);
+  });
 });
 
 test('wrong phone, wrong project or forged token are refused', async () => {
