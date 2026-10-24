@@ -1,6 +1,8 @@
 // Bank and mobile money transfers through Cashwyre, for Sierra Leone
 // accounts. Amounts in the API are major units.
 const express = require('express');
+const rateLimit = require('express-rate-limit');
+const env = require('../config/env');
 const { requireAuth } = require('../middleware/auth');
 const { validate, z, fields } = require('../middleware/validate');
 const { asyncHandler, ok } = require('../utils/helpers');
@@ -19,6 +21,21 @@ router.use((req, res, next) =>
 const country = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, 'Choose a country');
 const accountType = z.enum(['bank', 'mobile_money']);
 const accountNumber = z.string().trim().transform((v) => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^\+?\d{5,20}$/, 'Enter a valid account or mobile money number'));
+
+// Stops scripts from checking thousands of account numbers (name lookups)
+// or hammering prices, per signed-in user.
+const perUser = (limit, windowMin) =>
+  rateLimit({
+    windowMs: windowMin * 60 * 1000,
+    limit: env.isTest ? 10_000 : limit,
+    keyGenerator: (req) => String(req.user._id),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, code: 'RATE_LIMITED', message: 'Too many requests. Please wait a few minutes and try again.' },
+  });
+router.use('/lookup', perUser(40, 10));
+router.use(['/quote', '/fee'], perUser(60, 10));
+router.use('/send', perUser(10, 10));
 
 /** Countries, and whether bank and/or mobile money transfers work there. */
 router.get(

@@ -25,6 +25,7 @@ function user(u, { admin = false } = {}) {
     isApproved: u.isApproved,
     tier: u.country === 'SL' ? Math.min(4, Math.max(1, Number(u.tier) || 1)) : null,
     approvalNote: u.approvalNote || null,
+    hasAvatar: Boolean(u.avatarUpdatedAt),
     emailVerified: u.emailVerified,
     pinSet: Boolean(u.pinSet),
     pinLocked: Boolean(u.pinLockedUntil && new Date(u.pinLockedUntil) > new Date()),

@@ -10,9 +10,48 @@ const serialize = require('../serializers');
 const router = express.Router();
 router.use(requireAuth);
 
+const { User } = require('../models');
+const { badRequest } = require('../utils/errors');
+
+/** The profile photo as a data URI (null when there is none). */
+async function avatarOf(userId) {
+  const u = await User.findById(userId).select('+avatar avatarUpdatedAt');
+  if (!u || !u.avatar) return null;
+  const mime = u.avatar.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${u.avatar}`;
+}
+
 router.get(
   '/',
-  asyncHandler(async (req, res) => ok(res, serialize.user(req.user))),
+  asyncHandler(async (req, res) => ok(res, { ...serialize.user(req.user), avatar: await avatarOf(req.user._id) })),
+);
+
+// ── Profile photo ──────────────────────────────────────────
+
+const MAX_AVATAR = 400_000; // base64 characters (~300 KB)
+
+router.put(
+  '/avatar',
+  validate({ body: z.object({ image: z.string().min(100).max(MAX_AVATAR + 100, 'The photo is too large. Please choose a smaller one.') }) }),
+  asyncHandler(async (req, res) => {
+    const b64 = req.body.image.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+    if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length > MAX_AVATAR) throw badRequest('That photo can\'t be used.', 'INVALID_IMAGE');
+    // Only real JPEG or PNG images.
+    const head = Buffer.from(b64.slice(0, 16), 'base64');
+    const jpeg = head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+    const png = head.slice(0, 4).toString('hex') === '89504e47';
+    if (!jpeg && !png) throw badRequest('Please choose a JPEG or PNG photo.', 'INVALID_IMAGE');
+    await User.updateOne({ _id: req.user._id }, { $set: { avatar: b64, avatarUpdatedAt: new Date() } });
+    ok(res, { avatar: await avatarOf(req.user._id) });
+  }),
+);
+
+router.delete(
+  '/avatar',
+  asyncHandler(async (req, res) => {
+    await User.updateOne({ _id: req.user._id }, { $set: { avatar: null, avatarUpdatedAt: null } });
+    ok(res, { avatar: null });
+  }),
 );
 
 /** Everything the home screen needs in one call. */
@@ -25,7 +64,7 @@ router.get(
       getSettings(),
     ]);
     ok(res, {
-      user: serialize.user(req.user),
+      user: { ...serialize.user(req.user), avatar: await avatarOf(req.user._id) },
       recentTransactions: recent.map((t) => serialize.transaction(t)),
       unreadNotifications: unread,
       requireApproval: Boolean(settings.requireApproval),

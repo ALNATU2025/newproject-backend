@@ -85,6 +85,10 @@ const userSchema = new mongoose.Schema(
     // Bumped on password change / admin logout so old tokens stop working.
     tokenVersion: { type: Number, default: 0 },
     lastLoginAt: { type: Date, default: null },
+
+    // Profile photo: small JPEG/PNG as base64 (only loaded when asked for).
+    avatar: { type: String, default: null, select: false },
+    avatarUpdatedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

@@ -3,7 +3,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const env = require('../config/env');
-const { User } = require('../models');
+const crypto = require('crypto');
+const { User, QuickLogin } = require('../models');
 const { validate, z, fields } = require('../middleware/validate');
 const { requireAuth, signToken } = require('../middleware/auth');
 const { asyncHandler, ok, referralCodeFor } = require('../utils/helpers');
@@ -493,6 +494,101 @@ router.post(
     await otp.deleteCode(req.user.email, 'reset_pin');
     await notify(req.user._id, { title: 'PIN reset', body: 'Your payment PIN was reset.', kind: 'security' });
     ok(res, { message: 'Your payment PIN has been reset.' });
+  }),
+);
+
+// ── Quick sign-in with PIN or fingerprint ──────────────────
+// After a normal login the app enrols the phone and keeps a random device
+// key in the phone's secure storage. When the session expires, the PIN
+// plus that key signs the person back in. A separate key, released by the
+// phone only after a fingerprint / face check, allows biometric sign-in.
+// A password change or admin logout (tokenVersion) disables every key.
+
+const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+const deviceKey = z.string().regex(/^[a-f0-9]{64}$/, 'Invalid device key');
+
+router.post(
+  '/device/enroll',
+  requireAuth,
+  validate({ body: z.object({ deviceName: z.string().trim().max(60).optional(), platform: z.string().trim().max(20).optional() }) }),
+  asyncHandler(async (req, res) => {
+    const key = crypto.randomBytes(32).toString('hex');
+    const before = await QuickLogin.countDocuments({ user: req.user._id });
+    await QuickLogin.create({
+      user: req.user._id,
+      keyHash: sha256(key),
+      deviceName: req.body.deviceName || '',
+      platform: req.body.platform || '',
+      tokenVersion: req.user.tokenVersion || 0,
+    });
+    // Keep the 3 most recent phones.
+    const extra = await QuickLogin.find({ user: req.user._id }).sort({ createdAt: -1 }).skip(3).select('_id');
+    if (extra.length) await QuickLogin.deleteMany({ _id: { $in: extra.map((d) => d._id) } });
+    if (before > 0) {
+      await notify(req.user._id, {
+        title: 'New phone signed in',
+        body: `Your account was opened on ${req.body.deviceName || 'a new phone'}. If this wasn't you, change your password now.`,
+        kind: 'security',
+      });
+    }
+    ok(res, { deviceKey: key, userId: String(req.user._id) });
+  }),
+);
+
+/** Turns on fingerprint sign-in for this phone (needs the PIN). */
+router.post(
+  '/device/biometric',
+  requireAuth,
+  validate({ body: z.object({ deviceKey, pin: fields.pin }) }),
+  asyncHandler(async (req, res) => {
+    const d = await QuickLogin.findOne({ keyHash: sha256(req.body.deviceKey), user: req.user._id });
+    if (!d) throw badRequest('Sign in again on this phone first.', 'DEVICE_NOT_ENROLLED');
+    await pinService.verifyPin(req.user._id, req.body.pin);
+    const bioKey = crypto.randomBytes(32).toString('hex');
+    d.bioKeyHash = sha256(bioKey);
+    await d.save();
+    ok(res, { bioKey });
+  }),
+);
+
+router.post(
+  '/device/remove',
+  requireAuth,
+  validate({ body: z.object({ deviceKey }) }),
+  asyncHandler(async (req, res) => {
+    await QuickLogin.deleteOne({ keyHash: sha256(req.body.deviceKey), user: req.user._id });
+    ok(res, { removed: true });
+  }),
+);
+
+/** Signs back in with the device key and the PIN (or the biometric key). */
+router.post(
+  '/quick-login',
+  validate({
+    body: z
+      .object({ deviceKey, pin: fields.pin.optional(), bioKey: deviceKey.optional() })
+      .refine((b) => b.pin || b.bioKey, { message: 'Enter your PIN', path: ['pin'] }),
+  }),
+  asyncHandler(async (req, res) => {
+    const d = await QuickLogin.findOne({ keyHash: sha256(req.body.deviceKey) });
+    const user = d ? await User.findById(d.user) : null;
+    if (!d || !user || (user.tokenVersion || 0) !== d.tokenVersion) {
+      if (d) await QuickLogin.deleteOne({ _id: d._id });
+      throw unauthorized('Please log in with your password.', 'DEVICE_REVOKED');
+    }
+    if (!user.isActive) throw forbidden('Your account has been deactivated. Please contact support.', 'ACCOUNT_DISABLED');
+    if (req.body.bioKey) {
+      if (!d.bioKeyHash || d.bioKeyHash !== sha256(req.body.bioKey)) {
+        throw unauthorized('Fingerprint sign-in isn\'t set up on this phone. Use your PIN.', 'BIOMETRIC_INVALID');
+      }
+    } else {
+      await pinService.verifyPin(user._id, req.body.pin); // counts and locks wrong PINs
+    }
+    d.lastUsedAt = new Date();
+    await d.save();
+    user.lastLoginAt = new Date();
+    await user.save();
+    ok(res, session(user));
   }),
 );
 

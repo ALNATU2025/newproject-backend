@@ -27,6 +27,8 @@ const { usdRate } = require('./fx');
 const ACCOUNT_TYPES = { bank: 'bank', mobile_money: 'wallet' };
 const QUOTE_TTL = '10m';
 const DUPLICATE_WINDOW_MS = 60 * 1000;
+const VELOCITY_WINDOW_MS = 10 * 60 * 1000;
+const VELOCITY_MAX = 5; // transfers per 10 minutes
 
 // Sierra Leone accounts only (the routes refuse other countries).
 const serviceFor = () => 'sl_payout';
@@ -424,6 +426,22 @@ async function send(user, { quoteToken, pin }) {
   await verifyPin(user._id, pin);
 
   const service = serviceFor(user);
+  // Many transfers in a few minutes looks like a stolen phone or account.
+  const burst = await Transaction.countDocuments({
+    user: user._id,
+    type: 'payout',
+    createdAt: { $gte: new Date(Date.now() - VELOCITY_WINDOW_MS) },
+  });
+  if (burst >= VELOCITY_MAX) {
+    await raiseAlert({
+      type: 'suspicious',
+      severity: 'critical',
+      title: 'Many transfers in a short time',
+      body: `${user.fullName} tried a ${burst + 1}th transfer within 10 minutes. Further transfers are paused for a few minutes.`,
+      user: user._id,
+    });
+    throw new AppError(429, 'You\'ve made several transfers in a short time. For your safety, please wait a few minutes.', 'TOO_MANY_TRANSFERS');
+  }
   const recent = await Transaction.exists({
     user: user._id,
     type: 'payout',
