@@ -190,7 +190,29 @@ const Device = mongoose.model(
   ),
 );
 
+/**
+ * A phone allowed to sign back in with the PIN (or fingerprint) after the
+ * session expires. Only hashes of the keys are stored. A password change
+ * (tokenVersion) makes every key stop working.
+ */
+const QuickLogin = mongoose.model(
+  'QuickLogin',
+  new Schema(
+    {
+      user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+      keyHash: { type: String, required: true, unique: true },
+      bioKeyHash: { type: String, default: null },
+      deviceName: { type: String, default: '' },
+      platform: { type: String, default: '' },
+      tokenVersion: { type: Number, default: 0 },
+      lastUsedAt: { type: Date, default: null },
+    },
+    { timestamps: true },
+  ),
+);
+
 module.exports = {
+  QuickLogin,
   KycRequest,
   Device,
   Card,
