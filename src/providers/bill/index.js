@@ -65,7 +65,12 @@ function createRouter({ base, routes = {} }) {
   const all = [...new Set([base, ...Object.values(routes)])];
   // The provider an admin most cares about for balance/health: the routed
   // (real) one when there is one.
-  const primary = Object.values(routes)[0] || base;
+  // VTpass when it's used for anything (the Sierra Leone services are
+  // routed first and must not hide its balance), else the first routed one.
+  const primary =
+    all.find((p) => p.name === 'vtpass') ||
+    Object.entries(routes).find(([s]) => !SL_SERVICES.includes(s))?.[1] ||
+    base;
 
   const router = {
     get name() {

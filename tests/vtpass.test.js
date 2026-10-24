@@ -262,6 +262,36 @@ describe('payments', () => {
     expect(db.metadata.providerRaw.code).toBe('000');
   });
 
+  test('DStv any amount: VTpass renewal for the typed amount; StarTimes refuses', async () => {
+    const u = await readyUser({ fund: 20000 });
+    const r = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'dstv', smartcardNumber: '1212121212', action: 'amount', amount: 3500, phone: '08031234567', pin: u.pin,
+    });
+    expect(r.status).toBe(201);
+    const t = r.body.data.transaction;
+    expect(t).toEqual(expect.objectContaining({ status: 'success', amount: 3500 }));
+    expect(t.metadata.customAmount).toBe(true);
+    const pay = fake.calls.filter((c) => c.path === 'pay').pop();
+    expect(pay.body).toEqual(expect.objectContaining({ serviceID: 'dstv', subscription_type: 'renew', amount: 3500 }));
+
+    const missing = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'dstv', smartcardNumber: '1212121212', action: 'amount', phone: '08031234567', pin: u.pin,
+    });
+    expect(missing.body.code).toBe('AMOUNT_REQUIRED');
+    const st = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'startimes', smartcardNumber: '1212121212', action: 'amount', amount: 2000, phone: '08031234567', pin: u.pin,
+    });
+    expect(st.body.code).toBe('AMOUNT_NOT_SUPPORTED');
+  });
+
+  test('admin balance comes from VTpass even with Sierra Leone services routed first', async () => {
+    const fakeVt = createVtpass({
+      apiKey: 'k', publicKey: 'p', secretKey: 's', environment: 'sandbox', timeoutMs: 2000, fetchImpl: fake.fetchImpl,
+    });
+    const router = createRouter({ base: simulator, routes: { sl_airtime: simulator, sl_data: simulator, cable: fakeVt } });
+    expect(await router.balance()).toBe(18645075);
+  });
+
   test('GOtv change sends variation_code and months as quantity', async () => {
     const u = await readyUser({ fund: 20000 });
     const r = await api().post('/api/services/cable').set(tv(u)).send({

@@ -218,6 +218,9 @@ router.get(
 
 const smartcard = z.string().trim().regex(/^\d{8,12}$/, 'Enter a valid smartcard / IUC number');
 
+/** TV services that accept any amount (credited to the decoder account). */
+const ANY_AMOUNT_TV = ['dstv', 'gotv'];
+
 router.post(
   '/cable/verify',
   validate({ body: z.object({ provider: z.string().min(2), smartcardNumber: smartcard }) }),
@@ -240,8 +243,11 @@ router.post(
     body: z.object({
       provider: z.string().min(2),
       smartcardNumber: smartcard,
-      action: z.enum(['renew', 'change']),
+      // renew = current package, change = new package, amount = any amount
+      // credited to the decoder account (DStv / GOtv)
+      action: z.enum(['renew', 'change', 'amount']),
       planCode: z.string().optional(),
+      amount: z.coerce.number().min(100, 'The minimum is ₦100').max(1_000_000).optional(),
       months: z.coerce.number().int().min(1).max(12).default(1),
       phone: fields.phone,
       pin: fields.pin,
@@ -261,7 +267,14 @@ router.post(
       );
     }
     let chosen;
-    if (action === 'renew') {
+    if (action === 'amount') {
+      if (!ANY_AMOUNT_TV.includes(provider)) {
+        throw badRequest(`${prov.name} can only be paid by package.`, 'AMOUNT_NOT_SUPPORTED');
+      }
+      if (!req.body.amount) throw badRequest('Enter the amount to pay.', 'AMOUNT_REQUIRED');
+      if (months !== 1) throw badRequest('Pay one amount at a time.', 'TOO_MANY_MONTHS');
+      chosen = { code: 'amount', name: 'Account top-up', amount: toKobo(req.body.amount) };
+    } else if (action === 'renew') {
       const canRenew = customer.canRenew !== undefined ? customer.canRenew : Boolean(customer.renewalAmount);
       if (!canRenew || !customer.renewalAmount) {
         throw badRequest('Renewal isn\'t available for this decoder. Please choose a package.', 'RENEW_NOT_AVAILABLE');
@@ -282,8 +295,9 @@ router.post(
       amount: chosen.amount * months,
       recipient: smartcardNumber,
       description: `${prov.name} ${chosen.name}`,
-      providerParams: { provider, action, planCode: chosen.code, months, phone },
-      metadata: { provider: prov.name, plan: chosen.name, months, phone, customerName: customer.customerName },
+      // "Any amount" is a VTpass renewal for that amount.
+      providerParams: { provider, action: action === 'amount' ? 'renew' : action, planCode: chosen.code, months, phone },
+      metadata: { provider: prov.name, plan: chosen.name, months, phone, customerName: customer.customerName, ...(action === 'amount' ? { customAmount: true } : {}) },
     });
     respond(res, txn);
   }),
