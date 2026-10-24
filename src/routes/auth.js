@@ -27,6 +27,9 @@ const authLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { success: false, code: 'RATE_LIMITED', message: 'Too many attempts. Please try again in a few minutes.' },
+  // Enrolling a phone needs a signed-in session already; /quick-login
+  // (PIN or fingerprint, no session) stays limited.
+  skip: (req) => req.path.startsWith('/device/'),
 });
 router.use(authLimiter);
 
