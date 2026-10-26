@@ -290,7 +290,10 @@ router.post(
     }
     if (action === 'renew') {
       const canRenew = customer.canRenew !== undefined ? customer.canRenew : Boolean(customer.renewalAmount);
-      if (!canRenew || !customer.renewalAmount) {
+      // DStv renewals can be paid with a typed amount, even when VTpass
+      // returns no renewal price for the decoder.
+      const typed = req.body.amount !== undefined && ANY_AMOUNT_TV.includes(provider);
+      if (!typed && (!canRenew || !customer.renewalAmount)) {
         throw badRequest('Renewal isn\'t available for this decoder. Please choose a package.', 'RENEW_NOT_AVAILABLE');
       }
       // The renewal amount can be edited (DStv): pay that amount instead.

@@ -242,6 +242,27 @@ describe('plans and smartcard check', () => {
 });
 
 describe('payments', () => {
+  test('DStv renew with a typed amount works without a renewal price', async () => {
+    const { billProvider } = require('../src/providers/bill');
+    const bp = billProvider();
+    const real = bp.verifySmartcard;
+    bp.verifySmartcard = async (...a) => ({ ...(await real(...a)), renewalAmount: null, canRenew: false, currentPlanCode: null });
+    try {
+      const u = await readyUser({ fund: 20000 });
+      const r = await api().post('/api/services/cable').set(tv(u)).send({
+        provider: 'dstv', smartcardNumber: '1212121212', action: 'renew', amount: 4000, phone: '08031234567', pin: u.pin,
+      });
+      expect(r.status).toBe(201);
+      expect(r.body.data.transaction.amount).toBe(4000);
+      const noAmount = await api().post('/api/services/cable').set(tv(u)).send({
+        provider: 'dstv', smartcardNumber: '1212121212', action: 'renew', phone: '08031234567', pin: u.pin,
+      });
+      expect(noAmount.body.code).toBe('RENEW_NOT_AVAILABLE');
+    } finally {
+      bp.verifySmartcard = real;
+    }
+  });
+
   test('DStv renew with an edited amount', async () => {
     const u = await readyUser({ fund: 20000 });
     const r = await api().post('/api/services/cable').set(tv(u)).send({
