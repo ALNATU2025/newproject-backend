@@ -242,6 +242,21 @@ describe('plans and smartcard check', () => {
 });
 
 describe('payments', () => {
+  test('DStv renew with an edited amount', async () => {
+    const u = await readyUser({ fund: 20000 });
+    const r = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'dstv', smartcardNumber: '1212121212', action: 'renew', amount: 6000, months: 1, phone: '08031234567', pin: u.pin,
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.data.transaction).toEqual(expect.objectContaining({ status: 'success', amount: 6000 }));
+    const pay = fake.calls.filter((c) => c.path === 'pay').pop();
+    expect(pay.body).toEqual(expect.objectContaining({ serviceID: 'dstv', subscription_type: 'renew', amount: 6000 }));
+    const low = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'dstv', smartcardNumber: '1212121212', action: 'renew', amount: 200, phone: '08031234567', pin: u.pin,
+    });
+    expect(low.body.code).toBe('AMOUNT_TOO_LOW');
+  });
+
   test('DStv any amount: sent as a renewal with the amount the customer typed', async () => {
     const u = await readyUser({ fund: 20000 });
     const r = await api().post('/api/services/cable').set(tv(u)).send({

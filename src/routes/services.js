@@ -244,7 +244,7 @@ router.post(
     body: z.object({
       provider: z.string().min(2),
       smartcardNumber: smartcard,
-      // custom: DStv "pay any amount" (credited to the decoder's account)
+      // custom: kept for older apps; renew now takes an edited amount
       action: z.enum(['renew', 'change', 'custom']),
       planCode: z.string().optional(),
       amount: z.coerce.number().positive().max(1_000_000).optional(),
@@ -292,6 +292,26 @@ router.post(
       const canRenew = customer.canRenew !== undefined ? customer.canRenew : Boolean(customer.renewalAmount);
       if (!canRenew || !customer.renewalAmount) {
         throw badRequest('Renewal isn\'t available for this decoder. Please choose a package.', 'RENEW_NOT_AVAILABLE');
+      }
+      // The renewal amount can be edited (DStv): pay that amount instead.
+      if (req.body.amount !== undefined && toKobo(req.body.amount) !== customer.renewalAmount) {
+        if (!ANY_AMOUNT_TV.includes(provider)) {
+          throw badRequest(`${prov.name} renewals must be the renewal amount.`, 'CUSTOM_NOT_SUPPORTED');
+        }
+        if (Number(req.body.amount) < ANY_AMOUNT_MIN) {
+          throw badRequest(`Enter at least ₦${ANY_AMOUNT_MIN.toLocaleString('en-NG')}.`, 'AMOUNT_TOO_LOW');
+        }
+        const txn = await executePurchase({
+          user: req.user,
+          service: 'cable',
+          pin,
+          amount: toKobo(req.body.amount),
+          recipient: smartcardNumber,
+          description: `${prov.name} ${customer.currentPlan || 'renewal'}`,
+          providerParams: { provider, action: 'renew', planCode: customer.currentPlanCode || 'renew', months: 1, phone },
+          metadata: { provider: prov.name, plan: customer.currentPlan || 'Renewal', months: 1, phone, customerName: customer.customerName, customAmount: true },
+        });
+        return respond(res, txn);
       }
       chosen = {
         code: customer.currentPlanCode || 'renew',
