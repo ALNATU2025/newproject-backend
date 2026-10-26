@@ -62,6 +62,16 @@ transactionSchema.post('save', function tellAdmins(doc) {
   setImmediate(() => require('../services/txnEvents').onNewTransaction(doc).catch(() => {}));
 });
 
+// Remember the owner's latest transaction (for "last used" in Admin).
+transactionSchema.post('save', function noteLastTransaction(doc) {
+  if (!doc || !doc.user || doc.wallet === 'commission' && doc.type === 'commission') return;
+  if (['admin_credit', 'admin_debit', 'refund', 'commission', 'referral_bonus'].includes(doc.type)) return;
+  mongoose
+    .model('User')
+    .updateOne({ _id: doc.user, $or: [{ lastTransactionAt: null }, { lastTransactionAt: { $lt: doc.createdAt } }] }, { $set: { lastTransactionAt: doc.createdAt } })
+    .catch(() => {});
+});
+
 transactionSchema.index({ user: 1, createdAt: -1 });
 transactionSchema.index({ createdAt: -1 });
 transactionSchema.index({ user: 1, service: 1, status: 1, createdAt: -1 });

@@ -85,6 +85,10 @@ const userSchema = new mongoose.Schema(
     // Bumped on password change / admin logout so old tokens stop working.
     tokenVersion: { type: Number, default: 0 },
     lastLoginAt: { type: Date, default: null },
+    // Last time the app was used (any signed-in request; updated at most
+    // every 2 minutes) and the last payment / transfer.
+    lastSeenAt: { type: Date, default: null, index: true },
+    lastTransactionAt: { type: Date, default: null },
 
     // Profile photo: small JPEG/PNG as base64 (only loaded when asked for).
     avatar: { type: String, default: null, select: false },

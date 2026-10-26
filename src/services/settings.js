@@ -139,6 +139,13 @@ const DEFAULTS = {
     marginPercent: 3,
   },
 
+  // DStv ExtraView (Nigeria): our packages replace VTpass's (see
+  // routes/services.js). Fee in kobo, added to the bouquet's price.
+  dstvExtraView: {
+    enabled: true,
+    fee: 6_000 * NAIRA,
+  },
+
   lowBalanceAlerts: true,
   lowBalanceThreshold: 50_000 * NAIRA,
 };

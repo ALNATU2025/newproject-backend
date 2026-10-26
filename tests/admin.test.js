@@ -239,3 +239,24 @@ describe('go-live checklist', () => {
     expect((await api().get('/api/admin/readiness').set(auth(customer.token))).status).toBe(403);
   });
 });
+
+describe('last seen and last used', () => {
+  test('admins see last sign-in, last seen and last transaction', async () => {
+    const { User } = require('../src/models');
+    const admin = await readyUser({ role: 'super' });
+    const u = await readyUser({ fund: 1000 });
+    await api().post('/api/services/airtime').set(auth(u.token)).send({ network: 'mtn', phone: '08031234567', amount: 100, pin: u.pin });
+    // An old "last seen" is refreshed by the next request.
+    await User.updateOne({ _id: u.user.id }, { $set: { lastSeenAt: new Date(Date.now() - 60 * 60 * 1000) } });
+    await api().get('/api/me').set(auth(u.token));
+    const d = (await api().get(`/api/admin/users/${u.user.id}`).set(auth(admin.token))).body.data;
+    expect(new Date(d.lastSeenAt).getTime()).toBeGreaterThan(Date.now() - 60 * 1000);
+    expect(d.lastLoginAt).toBeTruthy();
+    expect(d.lastTransactionAt).toBeTruthy();
+    expect(d.lastTransaction).toMatch(/Airtime/);
+
+    const online = (await api().get('/api/admin/users?filter=online&sort=last_seen').set(auth(admin.token))).body.data;
+    expect(online.items.map((x) => x.id)).toContain(u.user.id);
+    expect(online.items[0]).toHaveProperty('lastSeenAt');
+  });
+});

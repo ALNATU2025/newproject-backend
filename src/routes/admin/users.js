@@ -31,7 +31,8 @@ router.get(
   validate({
     query: z.object({
       q: z.string().trim().max(60).optional(),
-      filter: z.enum(['all', 'active', 'inactive', 'admins', 'pending', 'low_balance']).default('all'),
+      filter: z.enum(['all', 'active', 'inactive', 'admins', 'pending', 'low_balance', 'online', 'dormant']).default('all'),
+      sort: z.enum(['newest', 'last_seen']).default('newest'),
       country: z.enum(['NG', 'SL']).optional(),
       page: z.string().optional(),
       limit: z.string().optional(),
@@ -46,6 +47,9 @@ router.get(
     if (filter === 'admins') where.role = { $ne: 'user' };
     if (filter === 'pending') where.isApproved = false;
     if (filter === 'low_balance') where.balance = { $lt: 500000 };
+    // Seen in the last 15 minutes / not seen for 30 days.
+    if (filter === 'online') where.lastSeenAt = { $gte: new Date(Date.now() - 15 * 60 * 1000) };
+    if (filter === 'dormant') where.$and = [{ $or: [{ lastSeenAt: null }, { lastSeenAt: { $lt: new Date(Date.now() - 30 * 86400000) } }] }];
     if (req.query.country === 'SL') where.country = 'SL';
     if (req.query.country === 'NG') where.country = { $ne: 'SL' };
     if (q) {
@@ -54,7 +58,7 @@ router.get(
       if (/^[a-f\d]{24}$/i.test(q)) where.$or.push({ _id: q });
     }
     const [items, total, all, active, admins, pending, sums] = await Promise.all([
-      User.find(where).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      User.find(where).sort(req.query.sort === 'last_seen' ? { lastSeenAt: -1, createdAt: -1 } : { createdAt: -1 }).skip(skip).limit(limit),
       User.countDocuments(where),
       User.countDocuments({}),
       User.countDocuments({ isActive: true }),
@@ -90,8 +94,16 @@ router.get(
   idParam,
   asyncHandler(async (req, res) => {
     const u = await loadUser(req.params.id);
-    const transactions = await Transaction.countDocuments({ user: u._id });
-    ok(res, { ...serialize.user(u, { admin: true }), transactions });
+    const [transactions, last] = await Promise.all([
+      Transaction.countDocuments({ user: u._id }),
+      Transaction.findOne({ user: u._id, type: { $nin: ['admin_credit', 'admin_debit', 'refund', 'commission', 'referral_bonus'] } }).sort({ createdAt: -1 }).select('createdAt description'),
+    ]);
+    ok(res, {
+      ...serialize.user(u, { admin: true }),
+      transactions,
+      lastTransactionAt: (last && last.createdAt) || u.lastTransactionAt || null,
+      lastTransaction: last ? last.description : null,
+    });
   }),
 );
 

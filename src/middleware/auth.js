@@ -4,6 +4,8 @@ const { User } = require('../models');
 const { unauthorized, forbidden } = require('../utils/errors');
 const { can } = require('../permissions');
 
+const SEEN_EVERY_MS = 2 * 60 * 1000;
+
 function signToken(user) {
   return jwt.sign({ sub: String(user._id), tv: user.tokenVersion || 0 }, env.jwtSecret, {
     expiresIn: env.jwtExpiresIn,
@@ -30,6 +32,11 @@ async function requireAuth(req, res, next) {
       throw forbidden('Your account has been deactivated. Please contact support.', 'ACCOUNT_DISABLED');
     }
     req.user = user;
+    // "Last seen" for admins, without a database write on every request.
+    if (!user.lastSeenAt || Date.now() - user.lastSeenAt.getTime() > SEEN_EVERY_MS) {
+      user.lastSeenAt = new Date();
+      User.updateOne({ _id: user._id }, { $set: { lastSeenAt: user.lastSeenAt } }).catch(() => {});
+    }
     next();
   } catch (e) {
     next(e);

@@ -51,6 +51,7 @@ function publicSettings(s) {
     ),
     adminNotify: s.adminNotify,
     slInternational: s.slInternational,
+    dstvExtraView: { enabled: s.dstvExtraView.enabled !== false, fee: toNaira(s.dstvExtraView.fee) },
     slFunding: {
       minAmount: toNaira(s.slFunding.minAmount),
       maxAmount: toNaira(s.slFunding.maxAmount),
@@ -105,6 +106,9 @@ router.patch(
         )
         .optional(),
       adminNotify: z.object({ transactions: z.boolean().optional() }).optional(),
+      dstvExtraView: z
+        .object({ enabled: z.boolean().optional(), fee: z.coerce.number().min(0).max(100_000).optional() })
+        .optional(),
       slInternational: z
         .object({
           rateLePerNaira: z.coerce.number().positive().nullable().optional(),
@@ -166,6 +170,11 @@ router.patch(
       }
     }
     if (b.adminNotify) patch.adminNotify = b.adminNotify;
+    if (b.dstvExtraView) {
+      patch.dstvExtraView = {};
+      if (b.dstvExtraView.enabled !== undefined) patch.dstvExtraView.enabled = b.dstvExtraView.enabled;
+      if (b.dstvExtraView.fee !== undefined) patch.dstvExtraView.fee = toKobo(b.dstvExtraView.fee);
+    }
     if (b.slInternational) {
       patch.slInternational = Object.fromEntries(Object.entries(b.slInternational).filter(([, v]) => v !== undefined));
     }

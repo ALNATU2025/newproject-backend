@@ -58,6 +58,8 @@ function user(u, { admin = false } = {}) {
     out.lifetimeCommission = toNaira(u.lifetimeCommission || 0);
     out.pinFailedAttempts = u.pinFailedAttempts || 0;
     out.lastLoginAt = u.lastLoginAt || null;
+    out.lastSeenAt = u.lastSeenAt || u.lastLoginAt || null;
+    out.lastTransactionAt = u.lastTransactionAt || null;
     out.referredBy = id(u.referredBy);
   }
   return out;

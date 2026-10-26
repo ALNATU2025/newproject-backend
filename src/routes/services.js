@@ -208,12 +208,51 @@ router.post(
 
 // ── Cable TV ───────────────────────────────────────────────
 
+// ── DStv ExtraView ─────────────────────────────────────────
+// VTpass can't sell ExtraView packages for now, so theirs are hidden and
+// ours are offered instead: "<bouquet> + ExtraView" at the bouquet's price
+// plus the ExtraView fee (Admin → Settings). They're paid to VTpass as a
+// renewal of that exact amount, credited to the decoder's account.
+const EXTRA_VIEW = /extra\s*-?\s*view/i;
+const DSTV_BOUQUETS = { padi: 'Padi', yanga: 'Yanga', confam: 'Confam', compact: 'Compact', 'compact plus': 'Compact Plus', premium: 'Premium' };
+
+/** "DStv  Compact Plus N12,400" → "compact plus". */
+function bouquetKey(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/[₦n]\s?[\d,]+(\.\d+)?/g, '')
+    .replace(/\bdstv\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function cablePlansFor(provider) {
+  const list = await p().cablePlans(provider);
+  if (provider !== 'dstv') return list;
+  const plain = list.filter((x) => !EXTRA_VIEW.test(x.name));
+  const xv = (await getSettings()).dstvExtraView || {};
+  if (xv.enabled === false || !(xv.fee > 0)) return plain;
+  const manual = [];
+  for (const [key, label] of Object.entries(DSTV_BOUQUETS)) {
+    const base = plain.find((x) => bouquetKey(x.name) === key);
+    if (!base) continue;
+    manual.push({
+      code: `xv-${base.code}`,
+      name: `DStv ${label} + ExtraView`,
+      amount: base.amount + xv.fee,
+      validity: base.validity || '1 month',
+      manual: true,
+    });
+  }
+  return [...plain, ...manual];
+}
+
 router.get('/cable/providers', asyncHandler(async (req, res) => ok(res, await p().cableProviders())));
 
 router.get(
   '/cable/plans',
   validate({ query: z.object({ provider: z.string().min(2) }) }),
-  asyncHandler(async (req, res) => ok(res, (await p().cablePlans(req.query.provider)).map(plan))),
+  asyncHandler(async (req, res) => ok(res, (await cablePlansFor(req.query.provider)).map(plan))),
 );
 
 const smartcard = z.string().trim().regex(/^\d{8,12}$/, 'Enter a valid smartcard / IUC number');
@@ -323,7 +362,21 @@ router.post(
       };
     } else {
       if (!req.body.planCode) throw badRequest('Choose a package.', 'PLAN_REQUIRED');
-      chosen = await findPlan(await p().cablePlans(provider), req.body.planCode, 'package');
+      chosen = await findPlan(await cablePlansFor(provider), req.body.planCode, 'package');
+    }
+    // Our ExtraView packages: pay the exact amount as a renewal.
+    if (chosen.manual) {
+      const txn = await executePurchase({
+        user: req.user,
+        service: 'cable',
+        pin,
+        amount: chosen.amount * months,
+        recipient: smartcardNumber,
+        description: `${chosen.name}`,
+        providerParams: { provider, action: 'renew', planCode: chosen.code, months, phone },
+        metadata: { provider: prov.name, plan: chosen.name, months, phone, customerName: customer.customerName, extraView: true },
+      });
+      return respond(res, txn);
     }
     const txn = await executePurchase({
       user: req.user,
