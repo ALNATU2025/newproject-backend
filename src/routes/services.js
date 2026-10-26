@@ -234,14 +234,20 @@ router.post(
   }),
 );
 
+// TV providers that accept any amount (paid into the decoder's account).
+const ANY_AMOUNT_TV = ['dstv'];
+const ANY_AMOUNT_MIN = 500; // ₦
+
 router.post(
   '/cable',
   validate({
     body: z.object({
       provider: z.string().min(2),
       smartcardNumber: smartcard,
-      action: z.enum(['renew', 'change']),
+      // custom: DStv "pay any amount" (credited to the decoder's account)
+      action: z.enum(['renew', 'change', 'custom']),
       planCode: z.string().optional(),
+      amount: z.coerce.number().positive().max(1_000_000).optional(),
       months: z.coerce.number().int().min(1).max(12).default(1),
       phone: fields.phone,
       pin: fields.pin,
@@ -261,6 +267,27 @@ router.post(
       );
     }
     let chosen;
+    if (action === 'custom') {
+      if (!ANY_AMOUNT_TV.includes(provider)) {
+        throw badRequest(`${prov.name} can't be paid with any amount. Choose a package instead.`, 'CUSTOM_NOT_SUPPORTED');
+      }
+      const naira = Number(req.body.amount);
+      if (!Number.isFinite(naira) || naira < ANY_AMOUNT_MIN) {
+        throw badRequest(`Enter at least ₦${ANY_AMOUNT_MIN.toLocaleString('en-NG')}.`, 'AMOUNT_TOO_LOW');
+      }
+      const txn = await executePurchase({
+        user: req.user,
+        service: 'cable',
+        pin,
+        amount: toKobo(naira),
+        recipient: smartcardNumber,
+        description: `${prov.name} payment`,
+        // Sent to the provider as a renewal with this amount.
+        providerParams: { provider, action: 'renew', planCode: customer.currentPlanCode || 'renew', months: 1, phone },
+        metadata: { provider: prov.name, plan: 'Any amount', months: 1, phone, customerName: customer.customerName, customAmount: true },
+      });
+      return respond(res, txn);
+    }
     if (action === 'renew') {
       const canRenew = customer.canRenew !== undefined ? customer.canRenew : Boolean(customer.renewalAmount);
       if (!canRenew || !customer.renewalAmount) {

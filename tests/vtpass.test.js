@@ -149,10 +149,11 @@ function fakeVtpass() {
 }
 
 let fake;
+let vt;
 
 beforeEach(() => {
   fake = fakeVtpass();
-  const vt = createVtpass({
+  vt = createVtpass({
     apiKey: 'AK',
     publicKey: 'PK_x',
     secretKey: 'SK_x',
@@ -241,6 +242,35 @@ describe('plans and smartcard check', () => {
 });
 
 describe('payments', () => {
+  test('DStv any amount: sent as a renewal with the amount the customer typed', async () => {
+    const u = await readyUser({ fund: 20000 });
+    const r = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'dstv', smartcardNumber: '1212121212', action: 'custom', amount: 5000, phone: '08031234567', pin: u.pin,
+    });
+    expect(r.status).toBe(201);
+    const t = r.body.data.transaction;
+    expect(t).toEqual(expect.objectContaining({ status: 'success', amount: 5000, description: 'DStv payment' }));
+    expect(t.metadata.customAmount).toBe(true);
+    const pay = fake.calls.filter((c) => c.path === 'pay').pop();
+    expect(pay.body).toEqual(expect.objectContaining({ serviceID: 'dstv', subscription_type: 'renew', amount: 5000 }));
+
+    const low = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'dstv', smartcardNumber: '1212121212', action: 'custom', amount: 100, phone: '08031234567', pin: u.pin,
+    });
+    expect(low.body.code).toBe('AMOUNT_TOO_LOW');
+    const gotv = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'gotv', smartcardNumber: '1212121212', action: 'custom', amount: 5000, phone: '08031234567', pin: u.pin,
+    });
+    expect(gotv.body.code).toBe('CUSTOM_NOT_SUPPORTED');
+  });
+
+  test('admin sees the VTpass balance even when Sierra Leone services are routed first', async () => {
+    setBillProvider(createRouter({ base: simulator, routes: { sl_airtime: simulator, sl_data: simulator, cable: vt, international: vt } }));
+    const admin = await readyUser({ role: 'super' });
+    const prov = (await api().get('/api/admin/provider').set(auth(admin.token))).body.data;
+    expect(prov.balance).toBe(186450.75);
+  });
+
   test('DStv renew sends subscription_type renew with the renewal amount', async () => {
     const u = await readyUser({ fund: 20000 });
     const r = await api().post('/api/services/cable').set(tv(u)).send({
