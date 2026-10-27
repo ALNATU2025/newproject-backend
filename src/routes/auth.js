@@ -18,6 +18,7 @@ const { COUNTRY_CODES, COUNTRIES } = require('../models/constants');
 const { normalizePhone, anyLocal, PHONE_HINT, toE164 } = require('../utils/phone');
 const { verifyIdToken } = require('../services/firebase');
 const twilio = require('../services/twilioVerify');
+const { noteSignIn, deviceFrom } = require('../services/devices');
 
 const router = express.Router();
 
@@ -229,6 +230,7 @@ router.post(
     const p = record.payload;
     if (!p) throw badRequest('Please start sign-up again.', 'CODE_EXPIRED');
     const user = await createAccount(p);
+    await noteSignIn(user._id, req, { how: 'sign-up' });
     ok(res, session(user), 201);
   }),
 );
@@ -244,6 +246,7 @@ router.post(
     const approved = await twilio.checkCode(toE164(p.phone, p.country), code);
     if (!approved) throw badRequest('Incorrect code. Please check the SMS and try again.', 'CODE_INVALID');
     const user = await createAccount(p, { phoneVerified: true });
+    await noteSignIn(user._id, req, { how: 'sign-up' });
     ok(res, session(user), 201);
   }),
 );
@@ -285,6 +288,7 @@ router.post(
       throw badRequest('Your email isn\'t verified yet. Tap the link in the email first.', 'EMAIL_NOT_VERIFIED');
     }
     const user = await createAccount(p);
+    await noteSignIn(user._id, req, { how: 'sign-up' });
     ok(res, session(user), 201);
   }),
 );
@@ -306,6 +310,7 @@ router.post(
       throw badRequest('This code was for a different phone number. Please try again.', 'PHONE_MISMATCH');
     }
     const user = await createAccount(p, { phoneVerified: true });
+    await noteSignIn(user._id, req, { how: 'sign-up' });
     ok(res, session(user), 201);
   }),
 );
@@ -369,6 +374,7 @@ router.post(
     }
     user.lastLoginAt = new Date();
     await user.save();
+    await noteSignIn(user._id, req, { how: 'password' });
     ok(res, session(user));
   }),
 );
@@ -527,7 +533,8 @@ router.post(
     // Keep the 3 most recent phones.
     const extra = await QuickLogin.find({ user: req.user._id }).sort({ createdAt: -1 }).skip(3).select('_id');
     if (extra.length) await QuickLogin.deleteMany({ _id: { $in: extra.map((d) => d._id) } });
-    if (before > 0) {
+    // Newer apps send X-Device-Id and are reported at sign-in instead.
+    if (before > 0 && !deviceFrom(req)) {
       await notify(req.user._id, {
         title: 'New phone signed in',
         body: `Your account was opened on ${req.body.deviceName || 'a new phone'}. If this wasn't you, change your password now.`,
@@ -591,6 +598,7 @@ router.post(
     await d.save();
     user.lastLoginAt = new Date();
     await user.save();
+    await noteSignIn(user._id, req, { how: req.body.bioKey ? 'fingerprint' : 'PIN' });
     ok(res, session(user));
   }),
 );

@@ -93,6 +93,23 @@ const userSchema = new mongoose.Schema(
     // Profile photo: small JPEG/PNG as base64 (only loaded when asked for).
     avatar: { type: String, default: null, select: false },
     avatarUpdatedAt: { type: Date, default: null },
+
+    // Phones / computers this account has signed in on (sha256 of the
+    // app's install id), so a sign-in from a new one can be reported.
+    knownDevices: {
+      type: [
+        {
+          _id: false,
+          idHash: String,
+          name: String,
+          platform: String,
+          firstSeenAt: Date,
+          lastSeenAt: Date,
+        },
+      ],
+      default: [],
+      select: false,
+    },
   },
   { timestamps: true },
 );

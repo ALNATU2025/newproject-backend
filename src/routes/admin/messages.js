@@ -95,6 +95,17 @@ router.post(
   }),
 );
 
+/** Sends a test push to the admin's own phones and a test webhook event. */
+router.post(
+  '/notifications/test',
+  requirePermission('notifications:send'),
+  asyncHandler(async (req, res) => {
+    // eslint-disable-next-line global-require
+    const result = await require('../../services/push').selfTest(req.user._id);
+    ok(res, result);
+  }),
+);
+
 // ── Alerts ─────────────────────────────────────────────────
 
 router.get(

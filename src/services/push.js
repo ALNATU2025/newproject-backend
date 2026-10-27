@@ -13,6 +13,7 @@ let fetchImpl = (...a) => fetch(...a);
 let accessToken = null;
 let accessTokenExpires = 0;
 const sent = []; // last messages, for tests
+let lastError = null; // last FCM failure (shown by the admin test)
 
 const pushConfigured = () => Boolean(env.firebase.serviceAccount);
 
@@ -76,10 +77,12 @@ async function sendToTokens(tokens, { title, body, data = {} }) {
         // The app was uninstalled or the token is stale: forget it.
         if (res.status === 404 || status === 'NOT_FOUND' || status === 'UNREGISTERED' || (status === 'INVALID_ARGUMENT' && /token/i.test(j.error.message || ''))) {
           await Device.deleteOne({ token: t });
-        } else if (!env.isTest) {
-          console.warn(`[push] HTTP ${res.status} ${status || ''}`);
+        } else {
+          lastError = `FCM HTTP ${res.status} ${status || ''} ${(j.error && j.error.message) || ''}`.trim();
+          if (!env.isTest) console.warn(`[push] ${lastError}`);
         }
       } catch (e) {
+        lastError = e.message;
         if (!env.isTest) console.warn(`[push] ${e.message}`);
       }
     }),
@@ -156,10 +159,43 @@ async function notifyAdmins({ event, title, body, severity = 'info', data = {} }
   }
 }
 
+/**
+ * "Send test notification" in Admin: a push to [userId]'s phones and a
+ * test event to the admin webhook, with what is set up and what worked.
+ */
+async function selfTest(userId) {
+  const devices = await Device.countDocuments({ user: userId });
+  const result = {
+    push: { configured: pushConfigured(), devices, delivered: 0 },
+    webhook: { configured: Boolean(env.adminWebhook.url), ok: false },
+  };
+  const message = { title: 'Dalabapay test notification', body: 'Push notifications are working on this phone.', data: { kind: 'general', event: 'test' } };
+  if (result.push.configured && devices) {
+    try {
+      const tokens = (await Device.find({ user: userId }).select('token')).map((d) => d.token);
+      lastError = null;
+      result.push.delivered = await sendToTokens(tokens, message);
+      if (!result.push.delivered && lastError) result.push.error = lastError;
+    } catch (e) {
+      result.push.error = e.message;
+    }
+  }
+  if (result.webhook.configured) {
+    result.webhook.ok = await postWebhook({ event: 'test', title: message.title, body: 'The admin webhook is working.', severity: 'info', data: {}, at: new Date().toISOString() });
+  }
+  const [staffWithPhones, usersWithPhones] = await Promise.all([
+    Device.distinct('user', { user: { $in: await User.find({ role: { $ne: 'user' }, isActive: true }).distinct('_id') } }),
+    Device.distinct('user'),
+  ]);
+  result.staffWithPhones = staffWithPhones.length;
+  result.usersWithPhones = usersWithPhones.length;
+  return result;
+}
+
 /** For tests. */
 function setFetch(fn) {
   fetchImpl = fn;
   accessToken = null;
 }
 
-module.exports = { pushConfigured, pushToUser, pushToUsers, notifyAdmins, setFetch, sent };
+module.exports = { pushConfigured, pushToUser, pushToUsers, notifyAdmins, selfTest, setFetch, sent };
