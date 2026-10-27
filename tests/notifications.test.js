@@ -146,7 +146,7 @@ for (const country of ['NG', 'SL']) {
       const pb = await withPhone(b, 'trb');
       await User.updateOne({ _id: a.user.id }, { $set: { balance: 1000 * 100 } });
       calls.length = 0;
-      const r = await api().post('/api/wallet/transfer').set(auth(a.token)).send({ phone: b.phone, amount: 30, pin: a.pin });
+      const r = await api().post('/api/wallet/transfer').set(auth(a.token)).send({ phone: b.phone, amount: country === 'SL' ? 30 : 300, pin: a.pin });
       expect(r.status).toBe(201);
       await settle();
       expect(pushTo(pa).some((m) => m.notification.title === 'Money sent')).toBe(true);
@@ -170,6 +170,13 @@ for (const country of ['NG', 'SL']) {
 }
 
 describe('funding', () => {
+  beforeAll(async () => {
+    const r = await api().patch('/api/admin/settings').set(auth(admin.token)).send({
+      slFunding: { methods: [{ id: 'orange', name: 'Orange Money', account: '076000111', accountName: 'Dalabapay SL' }] },
+    });
+    expect(r.status).toBe(200);
+  });
+
   test('Nigeria: automatic bank transfer credits the wallet and tells both sides', async () => {
     const u = await readyUser({});
     const phone = await withPhone(u, 'ngfund');
