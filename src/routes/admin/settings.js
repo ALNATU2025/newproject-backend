@@ -52,6 +52,7 @@ function publicSettings(s) {
     adminNotify: s.adminNotify,
     slInternational: s.slInternational,
     dstvExtraView: { enabled: s.dstvExtraView.enabled !== false, fee: toNaira(s.dstvExtraView.fee) },
+    ngBankFunding: s.ngBankFunding,
     slFunding: {
       minAmount: toNaira(s.slFunding.minAmount),
       maxAmount: toNaira(s.slFunding.maxAmount),
@@ -108,6 +109,14 @@ router.patch(
       adminNotify: z.object({ transactions: z.boolean().optional() }).optional(),
       dstvExtraView: z
         .object({ enabled: z.boolean().optional(), fee: z.coerce.number().min(0).max(100_000).optional() })
+        .optional(),
+      ngBankFunding: z
+        .object({
+          enabled: z.boolean().optional(),
+          accountNumber: z.string().trim().regex(/^\d{10}$/, 'Account number must be 10 digits').optional(),
+          accountName: z.string().trim().min(2).max(80).optional(),
+          bankName: z.string().trim().min(2).max(60).optional(),
+        })
         .optional(),
       slInternational: z
         .object({
@@ -174,6 +183,9 @@ router.patch(
       patch.dstvExtraView = {};
       if (b.dstvExtraView.enabled !== undefined) patch.dstvExtraView.enabled = b.dstvExtraView.enabled;
       if (b.dstvExtraView.fee !== undefined) patch.dstvExtraView.fee = toKobo(b.dstvExtraView.fee);
+    }
+    if (b.ngBankFunding) {
+      patch.ngBankFunding = Object.fromEntries(Object.entries(b.ngBankFunding).filter(([, v]) => v !== undefined));
     }
     if (b.slInternational) {
       patch.slInternational = Object.fromEntries(Object.entries(b.slInternational).filter(([, v]) => v !== undefined));

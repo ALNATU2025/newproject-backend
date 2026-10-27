@@ -44,7 +44,7 @@ function stringData(data = {}) {
   return Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)]));
 }
 
-async function sendToTokens(tokens, { title, body, data = {} }) {
+async function sendToTokens(tokens, { title, body, data = {}, dataOnly = false }) {
   if (!pushConfigured() || !tokens.length) return 0;
   const token = await googleToken();
   const project = env.firebase.serviceAccount.projectId || env.firebase.projectId;
@@ -56,13 +56,22 @@ async function sendToTokens(tokens, { title, body, data = {} }) {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: {
-              token: t,
-              notification: { title: String(title).slice(0, 120), body: String(body).slice(0, 400) },
-              data: stringData(data),
-              android: { priority: 'high' },
-              apns: { payload: { aps: { sound: 'default' } } },
-            },
+            // Messages with buttons (actions) are sent as data only, so the
+            // app draws the notification itself with Confirm / Cancel.
+            message: dataOnly
+              ? {
+                token: t,
+                data: stringData({ ...data, title: String(title).slice(0, 120), body: String(body).slice(0, 400) }),
+                android: { priority: 'high' },
+                apns: { headers: { 'apns-priority': '10' }, payload: { aps: { alert: { title, body }, sound: 'default', category: 'FUNDING_CONFIRM' } } },
+              }
+              : {
+                token: t,
+                notification: { title: String(title).slice(0, 120), body: String(body).slice(0, 400) },
+                data: stringData(data),
+                android: { priority: 'high' },
+                apns: { payload: { aps: { sound: 'default' } } },
+              },
           }),
           signal: AbortSignal.timeout(15000),
         });
@@ -122,11 +131,14 @@ async function pushToUsers(userIds, message) {
 async function postWebhook(payload) {
   const { url, secret } = env.adminWebhook;
   if (!url) return false;
+  const links = (payload.actions || []).filter((a) => a.url);
+  const slack = links.map((a) => `<${a.url}|${a.label}>`).join('   ');
+  const discord = links.map((a) => `[${a.label}](${a.url})`).join('   ');
   const body = JSON.stringify({
     ...payload,
     // So Slack ("text") and Discord ("content") show it without set-up.
-    text: `*${payload.title}*\n${payload.body}`,
-    content: `**${payload.title}**\n${payload.body}`,
+    text: `*${payload.title}*\n${payload.body}${slack ? `\n${slack}` : ''}`,
+    content: `**${payload.title}**\n${payload.body}${discord ? `\n${discord}` : ''}`,
   });
   const headers = { 'Content-Type': 'application/json', 'User-Agent': 'Dalabapay-Webhook/1' };
   if (secret) headers['X-Dalabapay-Signature'] = `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`;
@@ -145,13 +157,15 @@ async function postWebhook(payload) {
  * Tells the admins about [event]: a push to every staff phone and a POST
  * to ADMIN_WEBHOOK_URL. Never throws.
  */
-async function notifyAdmins({ event, title, body, severity = 'info', data = {} }) {
+async function notifyAdmins({ event, title, body, severity = 'info', data = {}, actions = null }) {
   const payload = { event, title, body, severity, data, at: new Date().toISOString() };
+  if (actions && actions.length) payload.actions = actions;
   try {
     const jobs = [postWebhook(payload)];
     if (pushConfigured()) {
       const staff = await User.find({ role: { $ne: 'user' }, isActive: true }).distinct('_id');
-      jobs.push(pushToUsers(staff, { title, body, data: { event, ...data } }));
+      const buttons = actions && actions.length ? { actions: actions.map((a) => a.id).join(',') } : {};
+      jobs.push(pushToUsers(staff, { title, body, data: { event, ...data, ...buttons }, dataOnly: Boolean(actions && actions.length) }));
     }
     await Promise.all(jobs);
   } catch (e) {

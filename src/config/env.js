@@ -112,6 +112,9 @@ const env = {
   // your own server…): every admin alert, new sign-up, transaction and
   // suspicious activity is POSTed as JSON. With ADMIN_WEBHOOK_SECRET the
   // body is signed: header X-Dalabapay-Signature = sha256=<HMAC hex>.
+  // This server's public address, for links in admin webhook messages
+  // (Render sets RENDER_EXTERNAL_URL itself).
+  publicUrl: clean(process.env.PUBLIC_URL) || clean(process.env.RENDER_EXTERNAL_URL),
   adminWebhook: {
     url: clean(process.env.ADMIN_WEBHOOK_URL),
     secret: clean(process.env.ADMIN_WEBHOOK_SECRET),

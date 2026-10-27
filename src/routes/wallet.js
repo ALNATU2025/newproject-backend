@@ -13,6 +13,7 @@ const { getSettings } = require('../services/settings');
 const { raiseAlert } = require('../services/alerts');
 const { notify } = require('../services/notify');
 const { creditDeposit } = require('../services/funding');
+const bankFunding = require('../services/bankFunding');
 const { findRecipient, executeTransfer } = require('../services/transfer');
 const { fmt, assertCanTransact } = require('../services/limits');
 const serialize = require('../serializers');
@@ -23,7 +24,7 @@ router.use(requireAuth);
 const isSl = (req) => req.user.country === 'SL';
 
 // Nigerian funding (bank accounts) isn't available to Sierra Leone accounts.
-router.use(['/fund/one-time', '/fund/assisted', '/verify-payment'], (req, res, next) =>
+router.use(['/fund/one-time', '/fund/assisted', '/fund/bank', '/verify-payment'], (req, res, next) =>
   next(isSl(req) ? forbidden('Use "Add Money" for Sierra Leone instead.', 'WRONG_COUNTRY') : undefined),
 );
 
@@ -52,8 +53,51 @@ router.get(
       minFunding: toNaira(settings.minFunding),
       maxFunding: toNaira(settings.maxFunding),
       bankTransferAvailable: paymentProvider().isConfigured(),
+      // "Add money" by transfer to the company account, confirmed by an admin.
+      manualBank: settings.ngBankFunding && settings.ngBankFunding.enabled !== false && settings.ngBankFunding.accountNumber
+        ? bankFunding.account(settings)
+        : null,
     });
   }),
+);
+
+// ── Nigeria: transfer to the company account, confirmed by an admin ──
+
+/** Amount + PIN → the account to pay (step 1). */
+router.post(
+  '/fund/bank',
+  validate({ body: z.object({ amount: fields.amount, pin: fields.pin }) }),
+  asyncHandler(async (req, res) => {
+    const amount = toKobo(req.body.amount);
+    await checkFundingAmount(amount);
+    await verifyPin(req.user._id, req.body.pin);
+    ok(res, { topUp: await bankFunding.start(req.user, amount) }, 201);
+  }),
+);
+
+/** The unfinished top-up, if any (reopens the confirm page). */
+router.get(
+  '/fund/bank/open',
+  asyncHandler(async (req, res) => ok(res, { topUp: await bankFunding.openFor(req.user._id) })),
+);
+
+router.get(
+  '/fund/bank/:id',
+  validate({ params: z.object({ id: fields.objectId }) }),
+  asyncHandler(async (req, res) => ok(res, { topUp: bankFunding.view(await bankFunding.findOwn(req.user._id, req.params.id)) })),
+);
+
+/** "I have sent it" (step 2): the admins are notified. */
+router.post(
+  '/fund/bank/:id/sent',
+  validate({ params: z.object({ id: fields.objectId }) }),
+  asyncHandler(async (req, res) => ok(res, { topUp: await bankFunding.markSent(req.user, req.params.id, req) })),
+);
+
+router.post(
+  '/fund/bank/:id/cancel',
+  validate({ params: z.object({ id: fields.objectId }) }),
+  asyncHandler(async (req, res) => ok(res, { topUp: await bankFunding.cancelOwn(req.user, req.params.id) })),
 );
 
 async function checkFundingAmount(amount) {

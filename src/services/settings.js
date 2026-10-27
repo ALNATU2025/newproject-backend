@@ -146,6 +146,16 @@ const DEFAULTS = {
     fee: 6_000 * NAIRA,
   },
 
+  // Nigeria "Add money": the person pays this account, taps "I have sent
+  // it", and an admin confirms (from the push or the webhook links) to
+  // credit the wallet. Edit in Admin → Settings (ngBankFunding).
+  ngBankFunding: {
+    enabled: true,
+    accountNumber: '3002991121',
+    accountName: 'Dalabapay Digital Service',
+    bankName: 'Kuda Bank',
+  },
+
   lowBalanceAlerts: true,
   lowBalanceThreshold: 50_000 * NAIRA,
 };

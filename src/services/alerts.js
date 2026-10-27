@@ -1,7 +1,7 @@
 // Admin alerts (activity feed) and the admin audit log.
 const { AdminAlert, AuditLog } = require('../models');
 
-async function raiseAlert({ type, severity = 'info', title, body, user = null, transaction = null }) {
+async function raiseAlert({ type, severity = 'info', title, body, user = null, transaction = null, data = {}, actions = null }) {
   try {
     const alert = await AdminAlert.create({ type, severity, title, body, user, transaction });
     // Push to staff phones and the admin webhook, without waiting.
@@ -12,7 +12,8 @@ async function raiseAlert({ type, severity = 'info', title, body, user = null, t
         title,
         body,
         severity,
-        data: { alertId: String(alert._id), userId: user ? String(user._id || user) : null, transactionId: transaction ? String(transaction._id || transaction) : null },
+        data: { ...data, alertId: String(alert._id), userId: user ? String(user._id || user) : null, transactionId: transaction ? String(transaction._id || transaction) : null },
+        actions,
       })
       .catch(() => {});
     return alert;

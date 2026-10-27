@@ -104,6 +104,8 @@ function createApp() {
   app.use('/api/payouts', require('./routes/payouts'));
   app.use('/api/cards', require('./routes/cards'));
   app.use('/api/webhooks', require('./routes/webhooks'));
+  // Confirm / Cancel links in admin webhook messages (bank top-ups).
+  app.use('/api/funding-actions', express.urlencoded({ extended: false, limit: '4kb' }), require('./routes/fundingActions'));
   app.use('/api/admin', require('./routes/admin'));
 
   if (!env.isProd && env.paymentProvider === 'simulator') {
