@@ -350,23 +350,28 @@ const floorTo = (v, cur) => (WHOLE_UNITS.has(cur) ? Math.floor(v + 1e-9) : Math.
 async function solveForSend(user, dest, sendAmount, settings) {
   const target = Math.round(Number(sendAmount) * 100); // sender's minor units
   const probe = WHOLE_UNITS.has(dest.currency) ? 10000 : 100;
+  const unit = WHOLE_UNITS.has(dest.currency) ? 1 : 0.01;
   let p = await price(user, dest, { amount: probe }, settings);
   let a = floorTo((probe * target) / p.charge, dest.currency);
-  for (let i = 0; i < 4 && a > 0; i += 1) {
+  let best = null; // largest amount found that fits in [target]
+  for (let i = 0; i < 6 && a > 0; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     p = await price(user, dest, { amount: a }, settings);
-    if (p.charge <= target && target - p.charge < Math.max(2, target * 0.002)) break;
+    if (p.charge <= target && (!best || a > best.a)) best = { a, p };
     const next = floorTo((a * target) / p.charge, dest.currency);
-    if (next === a) {
-      if (p.charge <= target) break;
-      a = floorTo(a - (WHOLE_UNITS.has(dest.currency) ? 1 : 0.01), dest.currency);
-    } else {
-      a = next;
-    }
+    if (p.charge <= target && next <= a) break;
+    a = next === a ? floorTo(a - unit, dest.currency) : next;
   }
-  if (!(a > 0) || p.charge > target) {
+  if (best) {
+    // Rounding can leave one cent on the table: try one step up.
+    const up = floorTo(best.a + unit, dest.currency);
+    const pu = await price(user, dest, { amount: up }, settings);
+    if (pu.charge <= target) best = { a: up, p: pu };
+  }
+  if (!best) {
     throw badRequest(`This amount is too small to cover the fees for ${dest.name}. Enter a bigger amount.`, 'AMOUNT_TOO_SMALL');
   }
+  p = best.p;
   return { ...p.breakdown, solvedFrom: Number(sendAmount) };
 }
 
