@@ -160,7 +160,7 @@ describe('Transfers to Nigerian banks (Sierra Leone accounts) through Kuda', () 
 
   test('declined by Kuda: refunded straight away', async () => {
     const u = await sl();
-    const q = await quote(u, { amount: 500 });
+    const q = await quote(u, { amount: 800 });
     transferMode = 'decline';
     const s = await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
     expect(s.body.code).toBe('TRANSFER_DECLINED');
