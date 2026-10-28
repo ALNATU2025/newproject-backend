@@ -162,9 +162,9 @@ describe('new device login in Sierra Leone: SMS code', () => {
     const phone = `0761234${String(n).padStart(2, '0')}`;
     await api().post('/api/auth/register').set(dev(A)).send(details(n, { phone, country: 'SL', email: `slsms${n}@example.com` }));
     const v = await api().post('/api/auth/register/verify-phone').set(dev(A))
-      .send({ email: `slsms${n}@example.com`, idToken: firebaseToken(`+23276${phone.slice(2)}`) });
+      .send({ email: `slsms${n}@example.com`, idToken: firebaseToken(`+232${phone.slice(1)}`) });
     expect(v.status).toBe(201);
-    return { email: `slsms${n}@example.com`, e164: `+23276${phone.slice(2)}` };
+    return { email: `slsms${n}@example.com`, e164: `+232${phone.slice(1)}` };
   }
   const login = (s, id) => api().post('/api/auth/login').set(dev(id)).send({ identifier: s.email, password: 'Passw0rdOk' });
 
