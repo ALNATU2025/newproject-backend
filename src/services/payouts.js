@@ -1,3 +1,4 @@
+const __m = (m) => { if (process.env.NODE_ENV === 'test') require('fs').writeSync(1, `::warning::KUDA P ${m}\n`); };
 // Transfers to bank accounts and mobile money wallets in other countries
 // (and at home), sent through Cashwyre.
 //
@@ -318,7 +319,9 @@ async function price(user, dest, { amount, accountNumber = '', accountType = 'ba
       cost = totalLocal;
       cashwyreFeeSender = feeNaira;
     } else {
+      __m('p-fx');
       const [mine, naira] = await Promise.all([usdRate(userCur, 'sell'), usdRate('NGN', 'buy')]);
+      __m('p-fx-done');
       perUsd = mine;
       const perNaira = mine / naira;
       cost = totalLocal * perNaira;
@@ -447,13 +450,17 @@ async function lookupName({ country, bankCode, accountNumber }) {
  * recipient gets, in the recipient country's currency (major units).
  */
 async function quote(user, { country, accountType, bankCode, accountNumber, accountName, amount, narration }) {
+  __m('q0');
   const settings = await checks(user);
+  __m('q1');
   const dest = await findCountry(country);
+  __m('q2');
   if (accountType === 'bank' && dest.bank === false) throw badRequest(`Bank transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
   if (accountType === 'mobile_money' && dest.mobileMoney === false) {
     throw badRequest(`Mobile money transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
   }
   const bank = await findBank(country, accountType, bankCode);
+  __m('q3');
 
   // Banks that check names: always use the name the bank returns.
   let name = accountName;
@@ -467,8 +474,11 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
   }
   if (!name || name.length < 2) throw badRequest('Enter the account holder\'s name.', 'ACCOUNT_NAME_REQUIRED');
 
+  __m('q4');
   const p = await price(user, dest, { amount, accountNumber, accountType }, settings);
+  __m('q5');
   await assertBusinessFunds(dest, p.walletCurrency, p.needed);
+  __m('q6');
   const { charge, debitWallet, walletCurrency, needed, userCur } = p;
   await assertWithinLimits(user, serviceFor(user), charge, settings);
 
