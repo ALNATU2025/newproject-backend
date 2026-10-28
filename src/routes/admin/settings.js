@@ -53,6 +53,7 @@ function publicSettings(s) {
     slInternational: s.slInternational,
     dstvExtraView: { enabled: s.dstvExtraView.enabled !== false, fee: toNaira(s.dstvExtraView.fee) },
     ngBankFunding: s.ngBankFunding,
+    deviceCheck: { enabled: Boolean(s.deviceCheck && s.deviceCheck.enabled) },
     slFunding: {
       minAmount: toNaira(s.slFunding.minAmount),
       maxAmount: toNaira(s.slFunding.maxAmount),
@@ -110,6 +111,7 @@ router.patch(
       dstvExtraView: z
         .object({ enabled: z.boolean().optional(), fee: z.coerce.number().min(0).max(100_000).optional() })
         .optional(),
+      deviceCheck: z.object({ enabled: z.boolean() }).optional(),
       ngBankFunding: z
         .object({
           enabled: z.boolean().optional(),
@@ -184,6 +186,7 @@ router.patch(
       if (b.dstvExtraView.enabled !== undefined) patch.dstvExtraView.enabled = b.dstvExtraView.enabled;
       if (b.dstvExtraView.fee !== undefined) patch.dstvExtraView.fee = toKobo(b.dstvExtraView.fee);
     }
+    if (b.deviceCheck) patch.deviceCheck = { enabled: b.deviceCheck.enabled };
     if (b.ngBankFunding) {
       patch.ngBankFunding = Object.fromEntries(Object.entries(b.ngBankFunding).filter(([, v]) => v !== undefined));
     }

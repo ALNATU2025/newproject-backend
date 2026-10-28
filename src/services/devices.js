@@ -75,6 +75,9 @@ async function noteSignIn(userId, req, { how = 'password' } = {}) {
  * app sent no device id). An account's first device is trusted.
  */
 async function needsVerification(userId, req) {
+  // eslint-disable-next-line global-require
+  const settings = await require('./settings').getSettings();
+  if (!settings.deviceCheck || !settings.deviceCheck.enabled) return false;
   const user = await User.findById(userId).select('+knownDevices');
   const known = (user && user.knownDevices) || [];
   if (!known.length) return false;

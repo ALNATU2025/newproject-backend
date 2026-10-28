@@ -8,6 +8,8 @@ const env = require('../src/config/env');
 const push = require('../src/services/push');
 
 useDatabase('notifications');
+// The new-device code is off by default; these tests check it switched on.
+beforeAll(() => require('../src/services/settings').updateSettings({ deviceCheck: { enabled: true } }));
 
 const HOOK = 'https://hooks.example.com/dalabapay-n';
 const calls = [];

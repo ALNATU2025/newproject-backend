@@ -5,6 +5,8 @@ const { api, useDatabase, signUp } = require('./helpers');
 const { Otp } = require('../src/models');
 
 useDatabase('devicecheck');
+// The new-device code is off by default; these tests check it switched on.
+beforeAll(() => require('../src/services/settings').updateSettings({ deviceCheck: { enabled: true } }));
 
 const device = (id) => ({ 'X-Device-Id': id, 'X-Device-Name': 'Test phone', 'X-Device-Platform': 'android' });
 const newId = () => crypto.randomBytes(16).toString('hex');
@@ -75,3 +77,20 @@ for (const country of ['NG', 'SL']) {
     });
   });
 }
+
+test('switched off: a new device logs straight in (the alert still goes out)', async () => {
+  const { updateSettings } = require('../src/services/settings');
+  const { AdminAlert } = require('../src/models');
+  await updateSettings({ deviceCheck: { enabled: false } });
+  try {
+    const s = await signUp({ country: 'NG' });
+    await login(s, device(newId()));
+    const r = await login(s, device(newId()));
+    expect(r.body.data.token).toBeTruthy();
+    expect(await AdminAlert.exists({ user: s.user.id, type: 'new_device' })).toBeTruthy();
+    // An app without a device id isn't blocked either.
+    expect((await api().post('/api/auth/login').send({ identifier: s.email, password: s.password })).body.data.token).toBeTruthy();
+  } finally {
+    await updateSettings({ deviceCheck: { enabled: true } });
+  }
+});

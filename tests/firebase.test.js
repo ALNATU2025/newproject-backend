@@ -6,6 +6,8 @@ const env = require('../src/config/env');
 const { setCertFetcher } = require('../src/services/firebase');
 
 useDatabase('firebase');
+// The new-device code is off by default; these tests check it switched on.
+beforeAll(() => require('../src/services/settings').updateSettings({ deviceCheck: { enabled: true } }));
 
 const PROJECT = 'dalabapay-test';
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
