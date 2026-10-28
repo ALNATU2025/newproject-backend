@@ -151,3 +151,51 @@ describe('choice: SMS or email, both through Firebase', () => {
   });
 });
 
+
+describe('new device login in Sierra Leone: SMS code', () => {
+  const dev = (id) => ({ 'X-Device-Id': id, 'X-Device-Name': 'Tecno', 'X-Device-Platform': 'android' });
+  const A = 'a'.repeat(32);
+  const B = 'b'.repeat(32);
+
+  async function slAccount(n) {
+    env.slSignupVerification = 'sms';
+    const phone = `0761234${String(n).padStart(2, '0')}`;
+    await api().post('/api/auth/register').set(dev(A)).send(details(n, { phone, country: 'SL', email: `slsms${n}@example.com` }));
+    const v = await api().post('/api/auth/register/verify-phone').set(dev(A))
+      .send({ email: `slsms${n}@example.com`, idToken: firebaseToken(`+23276${phone.slice(2)}`) });
+    expect(v.status).toBe(201);
+    return { email: `slsms${n}@example.com`, e164: `+23276${phone.slice(2)}` };
+  }
+  const login = (s, id) => api().post('/api/auth/login').set(dev(id)).send({ identifier: s.email, password: 'Passw0rdOk' });
+
+  test('a new device gets an SMS challenge; the Firebase token for the account phone logs in', async () => {
+    const s = await slAccount(61);
+    expect((await login(s, A)).body.data.token).toBeTruthy(); // the sign-up phone
+
+    const r = await login(s, B);
+    expect(r.body.data).toEqual(expect.objectContaining({ verification: 'device', method: 'sms', phoneE164: s.e164 }));
+    expect(r.body.data.phone).toMatch(/•••/);
+    expect(r.body.data.token).toBeUndefined();
+
+    const wrongPhone = await api().post('/api/auth/login/verify-device').set(dev(B))
+      .send({ challenge: r.body.data.challenge, idToken: firebaseToken('+23277999999') });
+    expect(wrongPhone.body.code).toBe('PHONE_MISMATCH');
+    const emailCode = await api().post('/api/auth/login/verify-device').set(dev(B))
+      .send({ challenge: r.body.data.challenge, code: '123456' });
+    expect(emailCode.body.code).toBe('CODE_REQUIRED');
+
+    const ok = await api().post('/api/auth/login/verify-device').set(dev(B))
+      .send({ challenge: r.body.data.challenge, idToken: firebaseToken(s.e164) });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.token).toBeTruthy();
+    expect((await login(s, B)).body.data.token).toBeTruthy(); // now known
+  });
+
+  test('Nigeria still uses the email code', async () => {
+    await api().post('/api/auth/register').set(dev(A)).send(details(7, { email: 'ngdev7@example.com', phone: '08030000077' }));
+    const v = await api().post('/api/auth/register/verify-phone').set(dev(A)).send({ email: 'ngdev7@example.com', idToken: firebaseToken('+2348030000077') });
+    expect(v.status).toBe(201);
+    const r = await api().post('/api/auth/login').set(dev(B)).send({ identifier: 'ngdev7@example.com', password: 'Passw0rdOk' });
+    expect(r.body.data).toEqual(expect.objectContaining({ verification: 'device', method: 'email' }));
+  });
+});

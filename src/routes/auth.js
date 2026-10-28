@@ -400,8 +400,29 @@ function maskEmail(email) {
   return `${shown}${'•'.repeat(Math.max(2, Math.min(6, name.length - shown.length)))}@${domain}`;
 }
 
-/** Emails a code and returns what the app needs for the code screen. */
+function maskPhone(e164) {
+  const v = String(e164 || '');
+  return v.length > 6 ? `${v.slice(0, 4)} ••• ${v.slice(-3)}` : v;
+}
+
+/**
+ * Starts the new-device check and returns what the app needs for the code
+ * screen. Sierra Leone: an SMS code to the account's phone (Firebase Phone
+ * Auth in the app). Nigeria: a code emailed to the account.
+ */
 async function startDeviceCheck(user, d) {
+  if (user.country === 'SL' && env.firebase.projectId) {
+    const phoneE164 = toE164(user.phone, 'SL');
+    const challenge = jwt.sign({ uid: String(user._id), dh: d.idHash, m: 'sms' }, env.jwtSecret, { audience: DEVICE_AUD, expiresIn: '15m' });
+    return {
+      verification: 'device',
+      method: 'sms',
+      challenge,
+      phoneE164,
+      phone: maskPhone(phoneE164),
+      message: `New device detected. We'll text a 6-digit code to ${maskPhone(phoneE164)}. Enter it to log in.`,
+    };
+  }
   let extra = {};
   try {
     extra = await otp.issueCode(user.email, 'new_device');
@@ -412,6 +433,7 @@ async function startDeviceCheck(user, d) {
   const challenge = jwt.sign({ uid: String(user._id), dh: d.idHash }, env.jwtSecret, { audience: DEVICE_AUD, expiresIn: '15m' });
   return {
     verification: 'device',
+    method: 'email',
     challenge,
     email: maskEmail(user.email),
     message: `New device detected. We sent a 6-digit code to ${maskEmail(user.email)}. Enter it to log in.`,
@@ -432,20 +454,38 @@ async function readChallenge(req) {
   const user = await User.findById(p.uid);
   if (!user) throw badRequest('This login has expired. Please log in again.', 'CHALLENGE_EXPIRED');
   if (!user.isActive) throw forbidden('Your account has been deactivated. Please contact support.', 'ACCOUNT_DISABLED');
-  return { user, d };
+  return { user, d, method: p.m || 'email' };
 }
 
 router.post(
   '/login/verify-device',
-  validate({ body: z.object({ challenge: z.string().min(20).max(2000), code: fields.code }) }),
+  validate({
+    body: z
+      .object({ challenge: z.string().min(20).max(2000), code: fields.code.optional(), idToken: z.string().min(20).max(5000).optional() })
+      .refine((b) => b.code || b.idToken, { message: 'Enter the 6-digit code', path: ['code'] }),
+  }),
   asyncHandler(async (req, res) => {
-    const { user } = await readChallenge(req);
-    await otp.checkCode(user.email, 'new_device', req.body.code);
-    await otp.deleteCode(user.email, 'new_device');
+    const { user, method } = await readChallenge(req);
+    if (method === 'sms') {
+      // The app checked the SMS code with Firebase; the token must be for
+      // this account's phone number and fresh.
+      if (!req.body.idToken) throw badRequest('Enter the code from the SMS.', 'CODE_REQUIRED');
+      const claims = await verifyIdToken(req.body.idToken);
+      if (claims.phone_number !== toE164(user.phone, user.country)) {
+        throw badRequest('This code was for a different phone number.', 'PHONE_MISMATCH');
+      }
+      if (!claims.auth_time || claims.auth_time * 1000 < Date.now() - 15 * 60 * 1000) {
+        throw badRequest('This code has expired. Please request a new one.', 'CODE_EXPIRED');
+      }
+    } else {
+      if (!req.body.code) throw badRequest('Enter the 6-digit code.', 'CODE_REQUIRED');
+      await otp.checkCode(user.email, 'new_device', req.body.code);
+      await otp.deleteCode(user.email, 'new_device');
+    }
     user.lastLoginAt = new Date();
     await user.save();
     // Remembers the device and tells the person and the admins.
-    await noteSignIn(user._id, req, { how: 'password + email code' });
+    await noteSignIn(user._id, req, { how: method === 'sms' ? 'password + SMS code' : 'password + email code' });
     ok(res, session(user));
   }),
 );
@@ -454,7 +494,9 @@ router.post(
   '/login/resend-device-code',
   validate({ body: z.object({ challenge: z.string().min(20).max(2000) }) }),
   asyncHandler(async (req, res) => {
-    const { user } = await readChallenge(req);
+    const { user, method } = await readChallenge(req);
+    // SMS codes are resent by the app (Firebase).
+    if (method === 'sms') return ok(res, { message: 'Request a new SMS from the app.' });
     const extra = await otp.issueCode(user.email, 'new_device');
     ok(res, { message: `A new code was sent to ${maskEmail(user.email)}.`, ...extra });
   }),
