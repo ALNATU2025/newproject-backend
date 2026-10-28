@@ -26,9 +26,9 @@ jobs:
           MONGO_URL: mongodb://localhost:27017/dalabapay_test
         run: |
           set +e
-          timeout 240 npx jest --runInBand --forceExit --testTimeout=20000 tests/kuda.test.js > jest.log 2>&1
+          timeout 120 npx jest --runInBand --detectOpenHandles --testTimeout=20000 tests/kuda.test.js > jest.log 2>&1
           echo "::error::MARKS%0A$(tail -n 25 /tmp/marks.txt | cut -c1-150 | sed ':a;N;$!ba;s/\n/%0A/g')"
-          echo "::error::JEST%0A$(grep -E '✓|✕|●|Tests:|Error|at ' jest.log | head -40 | cut -c1-160 | sed ':a;N;$!ba;s/\n/%0A/g')"
+          echo "::error::JEST%0A$(grep -v '^\s*$' jest.log | grep -A30 'open handle' | head -45 | cut -c1-160 | sed ':a;N;$!ba;s/\n/%0A/g')"
           npx jest --runInBand --json --outputFile=jest.json tests/kuda.test.js --testTimeout=20000 --forceExit > /dev/null 2>&1 &
           sleep 1
           code=1
