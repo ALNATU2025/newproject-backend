@@ -143,11 +143,11 @@ async function payoutCountries(opts) {
   const list = await baseCountries(opts);
   const currencies = [...new Set(list.map((c) => c.currency))];
   const balances = Object.fromEntries(
-    await Promise.all(currencies.map(async (cur) => [cur, await businessBalance(debitWalletFor(cur, 'SLE') || cur)])),
+    await Promise.all(currencies.map(async (cur) => [cur, await businessBalance(debitWalletFor(cur))])),
   );
   return list.map((c) => {
     const b = balances[c.currency];
-    return { ...c, wallet: debitWalletFor(c.currency, 'SLE') || c.currency, available: b === null || b === undefined ? null : b > 0 };
+    return { ...c, wallet: debitWalletFor(c.currency), available: b === null || b === undefined ? null : b > 0 };
   });
 }
 
@@ -169,8 +169,8 @@ async function coverage() {
       }
     }
     // eslint-disable-next-line no-await-in-loop
-    row.walletBalance = await businessBalance(debitWalletFor(c.currency, 'SLE') || c.currency);
-    row.wallet = debitWalletFor(c.currency, 'SLE') || c.currency;
+    row.walletBalance = await businessBalance(debitWalletFor(c.currency));
+    row.wallet = debitWalletFor(c.currency);
     rows.push(row);
   }
   rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -201,13 +201,12 @@ async function findBank(country, type, bankCode) {
 // ── Which business wallet pays, and is there enough in it ──
 
 /**
- * Wallet Cashwyre should debit ('' = the wallet in the transfer's own
- * currency). Each country's transfers come from that country's wallet
- * unless CASHWYRE_CROSS_BORDER_WALLET names one wallet for all.
+ * Wallet Cashwyre debits for a transfer: transfers to Nigeria are paid
+ * from the Naira (NGN) wallet; transfers to Sierra Leone and every other
+ * country from the Leones (SLE) wallet.
  */
-function debitWalletFor(destCurrency, senderCurrency) {
-  if (destCurrency === senderCurrency) return '';
-  return env.cashwyre.crossBorderWallet || '';
+function debitWalletFor(destCurrency) {
+  return destCurrency === 'NGN' ? 'NGN' : 'SLE';
 }
 
 const BALANCE_TTL = 30 * 1000;
@@ -276,11 +275,9 @@ async function checks(user, charge) {
 async function price(user, dest, { amount, accountNumber = '' }, settings) {
   const fee = await cashwyre.payoutFee({ currency: dest.currency, amount, accountNumber });
   const userCur = currencyOf(user.country);
-  const debitWallet = debitWalletFor(dest.currency, userCur);
-  const walletCurrency = debitWallet || dest.currency;
+  const debitWallet = debitWalletFor(dest.currency);
+  const walletCurrency = debitWallet;
   const totalLocal = fee.totalDebitLocal > 0 ? fee.totalDebitLocal : amount + fee.feeLocal;
-  // What leaves your Cashwyre wallet: the amount plus Cashwyre's fee.
-  const needed = walletCurrency === dest.currency ? totalLocal : walletCurrency === 'USD' ? fee.totalDebitUsd : 0;
 
   const pricing = settings.cashwyre || {};
   let cost; // Cashwyre's total, in the sender's currency
@@ -295,6 +292,12 @@ async function price(user, dest, { amount, accountNumber = '' }, settings) {
     cost = fee.totalDebitUsd * perUsd;
     cashwyreFeeSender = fee.feeUsd > 0 ? fee.feeUsd * perUsd : totalLocal > 0 ? (fee.feeLocal / totalLocal) * cost : 0;
   }
+  // What leaves the Cashwyre wallet (amount + Cashwyre's fee), in that
+  // wallet's currency. Converted totals are estimates, so only a wallet
+  // clearly too low (under 90% of it) stops the transfer.
+  let needed = 0;
+  if (walletCurrency === dest.currency) needed = totalLocal;
+  else if (walletCurrency === userCur) needed = cost * 0.9;
   const withFx = userCur === dest.currency ? cost : cost * (1 + (pricing.fxMarginPercent || 0) / 100);
   const charge = roundUp(withFx * (1 + (pricing.payoutFeePercent || 0) / 100));
   const cashwyreFee = roundUp(cashwyreFeeSender);
@@ -310,7 +313,7 @@ async function price(user, dest, { amount, accountNumber = '' }, settings) {
       feeCurrency: dest.currency,
       feeInYourCurrency: cashwyreFee / 100,
       feeUsd: fee.feeUsd || null,
-      totalDebit: walletCurrency === 'USD' ? fee.totalDebitUsd : totalLocal,
+      totalDebit: walletCurrency === dest.currency ? totalLocal : Math.round(cost * 100) / 100,
       wallet: walletCurrency,
       rate: fee.fxRate || null, // units of the recipient's currency per $1
       rateInfo: fee.fxRateInfo,
@@ -505,7 +508,7 @@ async function send(user, { quoteToken, pin }) {
       amount: q.amount,
       // Our reference always goes first so a webhook can be matched by it.
       narration: `${reference} ${q.narration || 'Dalabapay transfer'}`.slice(0, 100),
-      debitWalletCurrency: q.debitWallet !== undefined ? q.debitWallet : debitWalletFor(q.currency, cur),
+      debitWalletCurrency: q.debitWallet || debitWalletFor(q.currency),
     });
     txn.providerReference = r.transactionReference;
     await txn.save();

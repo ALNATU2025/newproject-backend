@@ -166,7 +166,7 @@ describe('admin coverage', () => {
     const rows = r.body.data.countries;
     expect(rows.length).toBeGreaterThanOrEqual(22);
     const gn = rows.find((c) => c.code === 'GN');
-    expect(gn).toEqual(expect.objectContaining({ currency: 'GNF', shown: false, wallet: 'GNF' }));
+    expect(gn).toEqual(expect.objectContaining({ currency: 'GNF', shown: false, wallet: 'SLE' }));
     expect(gn.bank.count).toBe(0);
     const sl = rows.find((c) => c.code === 'SL');
     expect(sl).toEqual(expect.objectContaining({ shown: true, walletBalance: 100000 }));
@@ -190,8 +190,8 @@ describe('transfers', () => {
     expect(s.body.data.transaction).toEqual(expect.objectContaining({ type: 'payout', status: 'pending', amount: 185.44, currency: 'SLE' }));
     const init = calls.find((c) => c.path === 'Payout/initiate').body;
     expect(init).toEqual(expect.objectContaining({ BankCode: 'MTN_GH', Amount: 100, Currency: 'GHS', Country: 'GH' }));
-    // Paid from your GHS wallet (each country from its own wallet).
-    expect(init.DebitWalletCurrency).toBeUndefined();
+    // Paid from the Leones wallet (every country except Nigeria).
+    expect(init.DebitWalletCurrency).toBe('SLE');
     expect((await balanceOf(u.token)).balance).toBeCloseTo(2000 - 185.44, 2);
 
     // A webhook alone isn't trusted: Cashwyre still says "processing".
@@ -215,7 +215,7 @@ describe('transfers', () => {
     const s = await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
     expect(s.status).toBe(201);
     const init = calls.find((c) => c.path === 'Payout/initiate').body;
-    expect(init.DebitWalletCurrency).toBeUndefined();
+    expect(init.DebitWalletCurrency).toBe('SLE');
 
     statuses[init.Reference] = 'failed';
     await Transaction.collection.updateOne({ reference: init.Reference }, { $set: { createdAt: new Date(Date.now() - 5 * 60 * 1000) } });
@@ -268,7 +268,7 @@ describe('transfers', () => {
     // Cross-border: GHS 100 costs $7.50 at Cashwyre (GHS 3 of it is their fee)
     const gh = await api().post('/api/payouts/fee').set(auth(u.token)).send({ country: 'GH', amount: 100 });
     expect(gh.body.data).toEqual(expect.objectContaining({ total: 185.44, usdRate: 24 }));
-    expect(gh.body.data.cashwyre).toEqual(expect.objectContaining({ fee: 3, feeCurrency: 'GHS', wallet: 'GHS', totalDebit: 103 }));
+    expect(gh.body.data.cashwyre).toEqual(expect.objectContaining({ fee: 3, feeCurrency: 'GHS', wallet: 'SLE', totalDebit: 180 }));
     const b = gh.body.data;
     expect(b.amountInYourCurrency + b.cashwyre.feeInYourCurrency + b.dalabapayFee).toBeCloseTo(185.44, 2);
 
@@ -281,47 +281,46 @@ describe('transfers', () => {
     expect(q.body.data.breakdown.total).toBe(q.body.data.charge);
   });
 
-  test('a country\'s wallet too low: refused before any money moves, admins told to fund it', async () => {
+  test('Leones wallet too low: transfers to other countries refused before any money moves, admins told to fund it', async () => {
     const { AdminAlert } = require('../src/models');
-    bizWallets.GHS = 50; // the transfer needs GHS 103
+    bizWallets.SLE = 50; // the transfer needs about Le 180
+    clearPayoutCache();
     try {
       const u = await user('SL', 2000);
       const list = await api().get('/api/payouts/countries').set(auth(u.token));
       const gh = list.body.data.countries.find((c) => c.code === 'GH');
-      expect(gh).toEqual(expect.objectContaining({ wallet: 'GHS', available: true }));
+      expect(gh).toEqual(expect.objectContaining({ wallet: 'SLE', available: true }));
       const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
         country: 'GH', accountType: 'bank', bankCode: 'GCB', accountNumber: '1234567890', accountName: 'Ama Owusu', amount: 100,
       });
       expect(q.status).toBe(503);
       expect(q.body.code).toBe('PAYOUT_WALLET_LOW');
-      expect(q.body.message).toMatch(/Transfers to GH aren't available right now/);
-      expect(await AdminAlert.exists({ title: 'Fund your Cashwyre GHS wallet' })).toBeTruthy();
+      expect(await AdminAlert.exists({ title: 'Fund your Cashwyre SLE wallet' })).toBeTruthy();
       expect((await balanceOf(u.token)).balance).toBeCloseTo(2000, 2);
       expect(calls.some((c) => c.path === 'Payout/initiate')).toBe(false);
 
-      bizWallets.GHS = 0;
+      bizWallets.SLE = 0;
       clearPayoutCache();
       const again = await api().get('/api/payouts/countries').set(auth(u.token));
       expect(again.body.data.countries.find((c) => c.code === 'GH').available).toBe(false);
+      // Nigeria is paid from the Naira wallet, so it is still open.
+      expect(again.body.data.countries.find((c) => c.code === 'NG')).toEqual(expect.objectContaining({ wallet: 'NGN', available: true }));
     } finally {
-      bizWallets.GHS = 5000;
+      bizWallets.SLE = 100000;
+      clearPayoutCache();
     }
   });
 
-  test('CASHWYRE_CROSS_BORDER_WALLET=USD pays every cross-border transfer from USD', async () => {
-    env.cashwyre.crossBorderWallet = 'USD';
-    try {
-      const u = await user('SL', 2000);
-      const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
-        country: 'GH', accountType: 'bank', bankCode: 'GCB', accountNumber: '1234567899', accountName: 'Ama Owusu', amount: 100,
-      });
-      expect(q.status).toBe(200);
-      await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
-      const init = calls.find((c) => c.path === 'Payout/initiate').body;
-      expect(init.DebitWalletCurrency).toBe('USD');
-    } finally {
-      env.cashwyre.crossBorderWallet = '';
-    }
+  test('transfers to Nigeria are paid from the Naira wallet', async () => {
+    const u = await user('SL', 2000);
+    const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({
+      country: 'NG', accountType: 'bank', bankCode: '0014', accountNumber: '8174538300', accountName: 'Ada Obi', amount: 300,
+    });
+    expect(q.status).toBe(200);
+    expect(q.body.data.breakdown.cashwyre.wallet).toBe('NGN');
+    await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
+    const init = calls.find((c) => c.path === 'Payout/initiate').body;
+    expect(init.DebitWalletCurrency).toBe('NGN');
   });
 
   test('webhook with Cashwyre\'s own reference settles the transfer when the status check can\'t answer', async () => {

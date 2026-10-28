@@ -69,4 +69,17 @@ async function noteSignIn(userId, req, { how = 'password' } = {}) {
   }
 }
 
-module.exports = { noteSignIn, deviceFrom };
+/**
+ * True when this sign-in must be confirmed with an emailed code: the
+ * account already has a known device and this isn't one of them (or the
+ * app sent no device id). An account's first device is trusted.
+ */
+async function needsVerification(userId, req) {
+  const user = await User.findById(userId).select('+knownDevices');
+  const known = (user && user.knownDevices) || [];
+  if (!known.length) return false;
+  const d = deviceFrom(req);
+  return !d || !known.some((k) => k.idHash === d.idHash);
+}
+
+module.exports = { noteSignIn, deviceFrom, needsVerification };

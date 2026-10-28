@@ -84,7 +84,15 @@ for (const country of ['NG', 'SL']) {
       expect(hooks().some((h) => h.event === 'alert.new_device')).toBe(false);
 
       calls.length = 0;
-      expect((await login(s, device(B, 'Samsung A15'))).status).toBe(200);
+      // A new device must enter a code emailed to the account first.
+      const challenge = await login(s, device(B, 'Samsung A15'));
+      expect(challenge.status).toBe(200);
+      expect(challenge.body.data).toEqual(expect.objectContaining({ verification: 'device' }));
+      expect(challenge.body.data.token).toBeUndefined();
+      const v = await api().post('/api/auth/login/verify-device').set(device(B, 'Samsung A15'))
+        .send({ challenge: challenge.body.data.challenge, code: challenge.body.data.devCode });
+      expect(v.status).toBe(200);
+      expect(v.body.data.token).toBeTruthy();
       await settle();
       const alert = hooks().find((h) => h.event === 'alert.new_device');
       expect(alert).toEqual(expect.objectContaining({ severity: 'warning' }));

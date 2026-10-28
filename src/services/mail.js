@@ -103,10 +103,13 @@ function codeEmail(code, purpose) {
     register: 'verify your email address',
     reset_password: 'reset your password',
     reset_pin: 'reset your payment PIN',
+    new_device: 'confirm it\'s you signing in to Dalabapay on a new device',
   }[purpose];
   return {
     subject: `Your Dalabapay code: ${code}`,
-    text: `Use ${code} to ${what}. The code expires in 10 minutes.\n\nIf you didn't request this, you can ignore this email.`,
+    text: purpose === 'new_device'
+      ? `Use ${code} to ${what}. The code expires in 10 minutes.\n\nIf this wasn't you, don't share the code: change your password now, because someone knows it.`
+      : `Use ${code} to ${what}. The code expires in 10 minutes.\n\nIf you didn't request this, you can ignore this email.`,
   };
 }
 

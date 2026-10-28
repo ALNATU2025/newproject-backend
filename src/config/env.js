@@ -167,13 +167,8 @@ const env = {
     baseUrl: clean(process.env.CASHWYRE_BASE_URL) || 'https://businessapi.cashwyre.com/api/v1.0',
     webhookToken: clean(process.env.CASHWYRE_WEBHOOK_TOKEN),
     // Which of your Cashwyre wallets pays a transfer to another country.
-    // Empty (default): the wallet in the recipient's currency — Ghana from
-    // GHS, Guinea from GNF, Senegal from XOF… Set a currency code (e.g.
-    // USD) to pay every cross-border transfer from that one wallet.
-    crossBorderWallet: (() => {
-      const v = clean(process.env.CASHWYRE_CROSS_BORDER_WALLET).toUpperCase();
-      return v === 'MATCH' || v === 'OWN' ? '' : v;
-    })(),
+    // Which Cashwyre wallet pays a transfer is fixed in services/payouts.js
+    // (Nigeria from NGN, everything else from SLE).
     fxFallback: Object.fromEntries(
       clean(process.env.CASHWYRE_FX_FALLBACK)
         .split(',')

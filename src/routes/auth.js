@@ -18,7 +18,8 @@ const { COUNTRY_CODES, COUNTRIES } = require('../models/constants');
 const { normalizePhone, anyLocal, PHONE_HINT, toE164 } = require('../utils/phone');
 const { verifyIdToken } = require('../services/firebase');
 const twilio = require('../services/twilioVerify');
-const { noteSignIn, deviceFrom } = require('../services/devices');
+const jwt = require('jsonwebtoken');
+const { noteSignIn, deviceFrom, needsVerification } = require('../services/devices');
 
 const router = express.Router();
 
@@ -372,10 +373,90 @@ router.post(
       const name = COUNTRIES[user.country || 'NG'].name;
       throw unauthorized(`This account is registered in ${name}. Select ${name} to log in.`, 'WRONG_COUNTRY');
     }
+    // A device this account hasn't used before: confirm with a code sent
+    // to the account's email before signing in.
+    if (await needsVerification(user._id, req)) {
+      const d = deviceFrom(req);
+      if (!d) {
+        throw forbidden('Please update Dalabapay to the latest version to log in on this phone.', 'APP_UPDATE_REQUIRED');
+      }
+      return ok(res, await startDeviceCheck(user, d));
+    }
     user.lastLoginAt = new Date();
     await user.save();
     await noteSignIn(user._id, req, { how: 'password' });
     ok(res, session(user));
+  }),
+);
+
+// ── New device: email code before login ────────────────────
+
+const DEVICE_AUD = 'device-verify';
+
+function maskEmail(email) {
+  const [name, domain] = String(email).split('@');
+  if (!domain) return email;
+  const shown = name.length <= 2 ? name[0] : `${name.slice(0, 2)}`;
+  return `${shown}${'•'.repeat(Math.max(2, Math.min(6, name.length - shown.length)))}@${domain}`;
+}
+
+/** Emails a code and returns what the app needs for the code screen. */
+async function startDeviceCheck(user, d) {
+  let extra = {};
+  try {
+    extra = await otp.issueCode(user.email, 'new_device');
+  } catch (e) {
+    // A code was sent less than a minute ago: it's still valid.
+    if (e.status !== 429) throw e;
+  }
+  const challenge = jwt.sign({ uid: String(user._id), dh: d.idHash }, env.jwtSecret, { audience: DEVICE_AUD, expiresIn: '15m' });
+  return {
+    verification: 'device',
+    challenge,
+    email: maskEmail(user.email),
+    message: `New device detected. We sent a 6-digit code to ${maskEmail(user.email)}. Enter it to log in.`,
+    ...extra,
+  };
+}
+
+async function readChallenge(req) {
+  let p;
+  try {
+    p = jwt.verify(req.body.challenge, env.jwtSecret, { audience: DEVICE_AUD });
+  } catch (e) {
+    throw badRequest('This login has expired. Please log in again.', 'CHALLENGE_EXPIRED');
+  }
+  // The code only works on the device that asked for it.
+  const d = deviceFrom(req);
+  if (!d || d.idHash !== p.dh) throw badRequest('Please log in again on this device.', 'CHALLENGE_DEVICE_MISMATCH');
+  const user = await User.findById(p.uid);
+  if (!user) throw badRequest('This login has expired. Please log in again.', 'CHALLENGE_EXPIRED');
+  if (!user.isActive) throw forbidden('Your account has been deactivated. Please contact support.', 'ACCOUNT_DISABLED');
+  return { user, d };
+}
+
+router.post(
+  '/login/verify-device',
+  validate({ body: z.object({ challenge: z.string().min(20).max(2000), code: fields.code }) }),
+  asyncHandler(async (req, res) => {
+    const { user } = await readChallenge(req);
+    await otp.checkCode(user.email, 'new_device', req.body.code);
+    await otp.deleteCode(user.email, 'new_device');
+    user.lastLoginAt = new Date();
+    await user.save();
+    // Remembers the device and tells the person and the admins.
+    await noteSignIn(user._id, req, { how: 'password + email code' });
+    ok(res, session(user));
+  }),
+);
+
+router.post(
+  '/login/resend-device-code',
+  validate({ body: z.object({ challenge: z.string().min(20).max(2000) }) }),
+  asyncHandler(async (req, res) => {
+    const { user } = await readChallenge(req);
+    const extra = await otp.issueCode(user.email, 'new_device');
+    ok(res, { message: `A new code was sent to ${maskEmail(user.email)}.`, ...extra });
   }),
 );
 

@@ -54,7 +54,7 @@ const Otp = mongoose.model(
   new Schema(
     {
       email: { type: String, required: true, lowercase: true, index: true },
-      purpose: { type: String, enum: ['register', 'reset_password', 'reset_pin'], required: true },
+      purpose: { type: String, enum: ['register', 'reset_password', 'reset_pin', 'new_device'], required: true },
       codeHash: { type: String, required: true },
       attempts: { type: Number, default: 0 },
       payload: { type: Schema.Types.Mixed, default: null }, // pending registration
