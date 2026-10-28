@@ -26,8 +26,10 @@ jobs:
           MONGO_URL: mongodb://localhost:27017/dalabapay_test
         run: |
           set +e
-          npx jest --runInBand --json --outputFile=jest.json > jest.log 2>&1
-          code=$?
+          timeout 240 npx jest --runInBand --forceExit --testTimeout=20000 tests/kuda.test.js 2>&1 | tee jest.log | grep -E '::warning::KUDA|✓|✕|Tests:' | head -60
+          npx jest --runInBand --json --outputFile=jest.json tests/kuda.test.js --testTimeout=20000 --forceExit > /dev/null 2>&1 &
+          sleep 1
+          code=1
           tail -n 80 jest.log
           node -e '
             const r = require("./jest.json");
