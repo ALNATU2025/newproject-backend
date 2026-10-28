@@ -64,7 +64,7 @@ async function fakeCashwyre(url, opts) {
       if (b.country === 'KE' && b.accountType === 'bank') return okData(b.transactionType ? [] : [{ code: 'KCB', name: 'KCB Bank' }]);
       return okData(BANKS[`${b.country}:${b.accountType}`] || []);
     case 'Payout/getFee':
-      if (b.currency === 'GHS') return okData({ sendAmount: b.amount, currency: 'GHS', feeInLocalCurrency: 3, totalDebitAmount: b.amount + 3, totalDebitInUSD: 7.5 });
+      if (b.currency === 'GHS') return okData({ sendAmount: b.amount, currency: 'GHS', feeInLocalCurrency: 3, totalDebitAmount: b.amount + 3, totalDebitInUSD: Math.round(((b.amount + 3) * 7.5 / 103) * 1e6) / 1e6 });
       return okData({ sendAmount: b.amount, currency: b.currency, feeInLocalCurrency: 10, totalDebitAmount: b.amount + 10, totalDebitInUSD: 22 });
     case 'businessRate/getFxRates':
       return okData([
@@ -271,6 +271,17 @@ describe('transfers', () => {
     expect(gh.body.data.cashwyre).toEqual(expect.objectContaining({ fee: 3, feeCurrency: 'GHS', wallet: 'SLE', totalDebit: 180 }));
     const b = gh.body.data;
     expect(b.amountInYourCurrency + b.cashwyre.feeInYourCurrency + b.dalabapayFee).toBeCloseTo(185.44, 2);
+
+    // "Enter in Leones": the recipient's amount is worked out, fees included.
+    const inLe = await api().post('/api/payouts/fee').set(auth(u.token)).send({ country: 'SL', sendAmount: 515.1 });
+    expect(inLe.body.data).toEqual(expect.objectContaining({ sendAmount: 500, total: 515.1, solvedFrom: 515.1 }));
+    const ghLe = await api().post('/api/payouts/fee').set(auth(u.token)).send({ country: 'GH', sendAmount: 185.44 });
+    expect(ghLe.body.data.sendAmount).toBeCloseTo(100, 0);
+    expect(ghLe.body.data.total).toBeLessThanOrEqual(185.44);
+    expect(ghLe.body.data.total).toBeGreaterThan(184.5);
+    const tiny = await api().post('/api/payouts/fee').set(auth(u.token)).send({ country: 'SL', sendAmount: 5 });
+    expect(tiny.body.code).toBe('AMOUNT_TOO_SMALL');
+    expect((await api().post('/api/payouts/fee').set(auth(u.token)).send({ country: 'SL' })).status).toBe(400);
 
     // The quote uses the provider's name, whatever was typed.
     const q = await api().post('/api/payouts/quote').set(auth(u.token)).send({

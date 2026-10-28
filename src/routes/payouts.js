@@ -63,7 +63,13 @@ router.post(
 /** Fee and rate preview while the customer types the amount. */
 router.post(
   '/fee',
-  validate({ body: z.object({ country, amount: fields.amount, accountType: accountType.optional() }) }),
+  // amount: what the recipient gets (their currency); or sendAmount: what
+  // the sender pays in total (Leones), and the recipient's amount is worked out.
+  validate({
+    body: z
+      .object({ country, amount: fields.amount.optional(), sendAmount: fields.amount.optional(), accountType: accountType.optional() })
+      .refine((b) => b.amount !== undefined || b.sendAmount !== undefined, { message: 'Enter an amount', path: ['amount'] }),
+  }),
   asyncHandler(async (req, res) => ok(res, await payouts.preview(req.user, req.body))),
 );
 

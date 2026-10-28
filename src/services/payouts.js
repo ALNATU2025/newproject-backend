@@ -327,15 +327,47 @@ async function price(user, dest, { amount, accountNumber = '' }, settings) {
 }
 
 /** Fee preview while the customer types (no account details needed). */
-async function preview(user, { country, amount, accountType }) {
+async function preview(user, { country, amount, sendAmount, accountType }) {
   const settings = await checks(user);
   const dest = await findCountry(country);
   if (accountType === 'bank' && dest.bank === false) throw badRequest(`Bank transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
   if (accountType === 'mobile_money' && dest.mobileMoney === false) {
     throw badRequest(`Mobile money transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
   }
-  const p = await price(user, dest, { amount }, settings);
-  return p.breakdown;
+  if (amount !== undefined && amount !== null) return (await price(user, dest, { amount }, settings)).breakdown;
+  return solveForSend(user, dest, sendAmount, settings);
+}
+
+// Currencies without cents.
+const WHOLE_UNITS = new Set(['XOF', 'XAF', 'GNF', 'UGX', 'RWF', 'BIF', 'KMF', 'DJF', 'JPY', 'KRW', 'VND', 'MGA', 'PYG']);
+const floorTo = (v, cur) => (WHOLE_UNITS.has(cur) ? Math.floor(v + 1e-9) : Math.floor(v * 100 + 1e-6) / 100);
+
+/**
+ * "Enter in Leones": the largest amount the recipient can get for
+ * [sendAmount] in the sender's currency, fees included. The price isn't a
+ * straight line (fixed + % fees), so it is solved in a few steps.
+ */
+async function solveForSend(user, dest, sendAmount, settings) {
+  const target = Math.round(Number(sendAmount) * 100); // sender's minor units
+  const probe = WHOLE_UNITS.has(dest.currency) ? 10000 : 100;
+  let p = await price(user, dest, { amount: probe }, settings);
+  let a = floorTo((probe * target) / p.charge, dest.currency);
+  for (let i = 0; i < 4 && a > 0; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    p = await price(user, dest, { amount: a }, settings);
+    if (p.charge <= target && target - p.charge < Math.max(2, target * 0.002)) break;
+    const next = floorTo((a * target) / p.charge, dest.currency);
+    if (next === a) {
+      if (p.charge <= target) break;
+      a = floorTo(a - (WHOLE_UNITS.has(dest.currency) ? 1 : 0.01), dest.currency);
+    } else {
+      a = next;
+    }
+  }
+  if (!(a > 0) || p.charge > target) {
+    throw badRequest(`This amount is too small to cover the fees for ${dest.name}. Enter a bigger amount.`, 'AMOUNT_TOO_SMALL');
+  }
+  return { ...p.breakdown, solvedFrom: Number(sendAmount) };
 }
 
 /** The account holder's name from the bank / mobile money provider. */
@@ -396,6 +428,7 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
     needed,
     chargeCurrency: userCur,
     rate: p.breakdown.rate,
+    serviceFee: Math.round(((p.breakdown.cashwyre.feeInYourCurrency || 0) + (p.breakdown.dalabapayFee || 0)) * 100) / 100,
   };
   const token = jwt.sign({ sub: String(user._id), q }, env.jwtSecret, { expiresIn: QUOTE_TTL, audience: 'payout-quote' });
   return {
@@ -488,6 +521,8 @@ async function send(user, { quoteToken, pin }) {
         accountName: q.accountName,
         accountNumber: q.accountNumber,
         rate: q.rate,
+        serviceFee: q.serviceFee !== undefined ? q.serviceFee : null,
+        chargeCurrency: q.chargeCurrency || null,
         narration: q.narration,
       },
     });
