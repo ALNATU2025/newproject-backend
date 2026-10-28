@@ -8,6 +8,7 @@ const env = require('../../config/env');
 const providers = {
   none: () => require('./none'),
   simulator: () => require('./simulator'),
+  kuda: () => require('./kuda'),
 };
 
 let current = null;

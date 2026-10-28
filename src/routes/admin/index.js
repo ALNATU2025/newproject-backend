@@ -16,6 +16,7 @@ router.use('/dashboard', require('./dashboard'));
 router.use('/users', require('./users'));
 router.use('/kyc', require('./kyc'));
 router.use('/cashwyre', require('./cashwyre'));
+router.use('/kuda', require('./kuda'));
 router.use('/transactions', require('./transactions'));
 router.use('/funding', require('./funding'));
 router.use('/disputes', require('./disputes'));

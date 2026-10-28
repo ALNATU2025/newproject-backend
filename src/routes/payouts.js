@@ -8,6 +8,7 @@ const { validate, z, fields } = require('../middleware/validate');
 const { asyncHandler, ok } = require('../utils/helpers');
 const { forbidden } = require('../utils/errors');
 const cashwyre = require('../providers/cashwyre');
+const kuda = require('../providers/kuda');
 const payouts = require('../services/payouts');
 const serialize = require('../serializers');
 
@@ -40,7 +41,10 @@ router.use('/send', perUser(10, 10));
 /** Countries, and whether bank and/or mobile money transfers work there. */
 router.get(
   '/countries',
-  asyncHandler(async (req, res) => ok(res, { connected: cashwyre.configured(), countries: cashwyre.configured() ? await payouts.payoutCountries() : [] })),
+  asyncHandler(async (req, res) => {
+    const connected = cashwyre.configured() || kuda.configured();
+    ok(res, { connected, countries: connected ? await payouts.payoutCountries() : [] });
+  }),
 );
 
 /** Banks (type=bank) or mobile money providers (type=mobile_money). */

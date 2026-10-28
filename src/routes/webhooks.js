@@ -10,55 +10,78 @@ const { raiseAlert } = require('../services/alerts');
 const crypto = require('crypto');
 const env = require('../config/env');
 const cashwyre = require('../providers/cashwyre');
+const kuda = require('../providers/kuda');
 const payouts = require('../services/payouts');
 const cards = require('../services/cards');
 
 const router = express.Router();
+
+/** Credits a normalised incoming payment; idempotent on providerReference. */
+async function creditIncoming(event) {
+  // A one-time account payment (matched by our reference)…
+  if (event.reference) {
+    const pending = await Transaction.findOne({ reference: event.reference, type: 'wallet_funding' });
+    if (pending && pending.status !== 'pending') {
+      return { credited: false, alreadyProcessed: true, reference: pending.reference };
+    }
+    if (pending) {
+      const r = await creditDeposit({
+        userId: pending.user,
+        amount: event.amount,
+        method: 'one_time',
+        providerReference: event.providerReference,
+        pendingTxn: pending,
+      });
+      return { credited: !r.duplicate, reference: r.transaction.reference };
+    }
+  }
+  // …or a transfer into a user's own account number.
+  if (event.accountNumber) {
+    const user = await User.findOne({ 'dedicatedAccount.accountNumber': event.accountNumber }).select('_id');
+    if (user) {
+      const r = await creditDeposit({
+        userId: user._id,
+        amount: event.amount,
+        method: 'bank_transfer',
+        providerReference: event.providerReference,
+        description: event.senderName ? `Wallet top-up · from ${event.senderName}` : 'Wallet top-up · Bank transfer',
+      });
+      return { credited: !r.duplicate, reference: r.transaction.reference };
+    }
+  }
+  await raiseAlert({
+    type: 'wallet',
+    severity: 'warning',
+    title: 'Unmatched payment',
+    body: `A payment of ₦${(event.amount / 100).toFixed(2)} (${event.providerReference}${event.accountNumber ? `, to ${event.accountNumber}` : ''}) didn't match any user.`,
+  });
+  return { credited: false };
+}
 
 router.post(
   '/payment',
   asyncHandler(async (req, res) => {
     const event = paymentProvider().parseWebhook(req);
     if (event.event !== 'transfer.received') return ok(res, { ignored: true });
+    return ok(res, await creditIncoming(event));
+  }),
+);
 
-    // A one-time account payment (matched by our reference)…
-    if (event.reference) {
-      const pending = await Transaction.findOne({ reference: event.reference, type: 'wallet_funding' });
-      if (pending && pending.status !== 'pending') {
-        return ok(res, { credited: false, alreadyProcessed: true, reference: pending.reference });
-      }
-      if (pending) {
-        const r = await creditDeposit({
-          userId: pending.user,
-          amount: event.amount,
-          method: 'one_time',
-          providerReference: event.providerReference,
-          pendingTxn: pending,
-        });
-        return ok(res, { credited: !r.duplicate, reference: r.transaction.reference });
-      }
+// ── Kuda (Add Money account numbers) ───────────────────────
+// Give Kuda this URL for payment notifications:
+//   https://<your server>/api/webhooks/kuda/<KUDA_WEBHOOK_TOKEN>
+router.post(
+  '/kuda/:token',
+  asyncHandler(async (req, res) => {
+    const expected = Buffer.from(env.kuda.webhookToken || '');
+    const given = Buffer.from(String(req.params.token || ''));
+    if (!expected.length || expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Not found.' });
     }
-    // …or a transfer into a user's dedicated account.
-    if (event.accountNumber) {
-      const user = await User.findOne({ 'dedicatedAccount.accountNumber': event.accountNumber }).select('_id');
-      if (user) {
-        const r = await creditDeposit({
-          userId: user._id,
-          amount: event.amount,
-          method: 'bank_transfer',
-          providerReference: event.providerReference,
-          description: 'Wallet top-up · Bank transfer',
-        });
-        return ok(res, { credited: !r.duplicate, reference: r.transaction.reference });
-      }
-    }
-    await raiseAlert({
-      type: 'wallet',
-      severity: 'warning',
-      title: 'Unmatched payment',
-      body: `A payment of ₦${(event.amount / 100).toFixed(2)} (${event.providerReference}) didn't match any user.`,
-    });
-    return ok(res, { credited: false });
+    if (!env.isTest) console.log(`[kuda webhook] ${JSON.stringify(req.body || {}).slice(0, 800)}`);
+    const event = kuda.parseCredit(req.body);
+    if (!event) return ok(res, { ignored: true });
+    return ok(res, await creditIncoming(event));
   }),
 );
 

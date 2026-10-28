@@ -1,5 +1,6 @@
 // Wallet: balance, adding money, sending money, checking a transfer.
 const express = require('express');
+const env = require('../config/env');
 const { assertCanReceive } = require('../services/tiers');
 const { Transaction } = require('../models');
 const { requireAuth } = require('../middleware/auth');
@@ -44,17 +45,33 @@ router.get(
         bankTransferAvailable: false,
       });
     }
+    // Kuda issues each customer's account number without an ID check:
+    // create it the first time Add Money is opened.
+    const provider = paymentProvider();
+    if (provider.kycFree && provider.isConfigured() && !String((req.user.dedicatedAccount || {}).providerRef || '').startsWith('KDA')) {
+      try {
+        req.user.dedicatedAccount = await provider.createDedicatedAccount(req.user);
+        await req.user.save();
+      } catch (e) {
+        if (!env.isTest) console.error(`[wallet] account number not created: ${e.message}`);
+      }
+    }
+    const hasAccount = Boolean(req.user.dedicatedAccount && req.user.dedicatedAccount.accountNumber);
     ok(res, {
       balance: toNaira(req.user.balance),
       commissionBalance: toNaira(req.user.commissionBalance),
       dedicatedAccount: serialize.user(req.user).dedicatedAccount,
+      // Kuda: Add Money shows only the account number (no one-time accounts).
+      accountNumberOnly: Boolean(provider.kycFree && hasAccount),
+      oneTimeAvailable: provider.oneTimeAvailable !== false,
       kycStatus: req.user.kyc.status,
       fundingFeePercent: settings.fundingFeePercent,
       minFunding: toNaira(settings.minFunding),
       maxFunding: toNaira(settings.maxFunding),
       bankTransferAvailable: paymentProvider().isConfigured(),
       // "Add money" by transfer to the company account, confirmed by an admin.
-      manualBank: settings.ngBankFunding && settings.ngBankFunding.enabled !== false && settings.ngBankFunding.accountNumber
+      // (Not shown once the customer has their own account number.)
+      manualBank: !hasAccount && settings.ngBankFunding && settings.ngBankFunding.enabled !== false && settings.ngBankFunding.accountNumber
         ? bankFunding.account(settings)
         : null,
     });

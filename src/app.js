@@ -70,6 +70,12 @@ function createApp() {
         keys: env.cashwyre.secretKey && env.cashwyre.businessCode ? 'set' : 'MISSING',
         webhook: env.cashwyre.webhookToken ? 'set' : 'MISSING — set CASHWYRE_WEBHOOK_TOKEN',
       },
+      kuda: {
+        mode: env.kuda.env,
+        keys: env.kuda.email && env.kuda.apiKey && env.kuda.accountNumber ? 'set' : 'MISSING — set KUDA_EMAIL, KUDA_API_KEY, KUDA_ACCOUNT_NUMBER',
+        addMoney: env.paymentProvider === 'kuda' ? 'on' : 'off — set PAYMENT_PROVIDER=kuda',
+        webhook: env.kuda.webhookToken ? 'set' : 'MISSING — set KUDA_WEBHOOK_TOKEN',
+      },
       vtpass: {
         mode: vt.environment,
         keys: vt.apiKey && vt.publicKey && vt.secretKey ? 'set' : 'MISSING',

@@ -12,6 +12,7 @@ const env = require('../config/env');
 const { Transaction } = require('../models');
 const { COUNTRIES } = require('../models/constants');
 const cashwyre = require('../providers/cashwyre');
+const kuda = require('../providers/kuda');
 const { AppError, badRequest, conflict, unavailable } = require('../utils/errors');
 const { makeReference } = require('../utils/helpers');
 const { currencyOf, formatMoney } = require('../utils/money');
@@ -64,6 +65,12 @@ async function bankList(country, type, { fresh = false } = {}) {
   const key = `${country}:${type}`;
   const hit = bankCache.get(key);
   if (!fresh && hit && Date.now() - hit.at < (hit.list.length ? BANK_TTL : EMPTY_TTL)) return hit.list;
+  if (viaKuda(country, type)) {
+    const banks = (await kuda.bankList()).map((b) => ({ ...b, nameEnquiryRequired: true, provider: 'kuda' }));
+    bankCache.set(key, { at: Date.now(), list: banks });
+    return banks;
+  }
+  if (country === 'NG' && type === 'mobile_money' && kuda.configured() && !cashwyre.configured()) return [];
   let list = [];
   let lastError = null;
   for (const [accountType, transactionType] of LIST_VARIANTS[type] || []) {
@@ -108,9 +115,10 @@ async function baseCountries({ fresh = false } = {}) {
       else if (c.canPayout && c.currencies[0]) byCode.set(c.code, { code: c.code, name: c.name || c.code, currency: c.currencies[0] });
     }
   } catch (e) {
-    if (e instanceof AppError && e.code === 'PROVIDER_NOT_CONFIGURED') throw e;
+    if (e instanceof AppError && e.code === 'PROVIDER_NOT_CONFIGURED' && !kuda.configured()) throw e;
   }
-  const list = [...byCode.values()].filter((c) => c.currency);
+  // Only Kuda connected: Nigeria (banks) only.
+  const list = [...byCode.values()].filter((c) => c.currency && (cashwyre.configured() || c.code === 'NG'));
 
   const out = [];
   for (let i = 0; i < list.length; i += 6) {
@@ -141,11 +149,12 @@ async function baseCountries({ fresh = false } = {}) {
  */
 async function payoutCountries(opts) {
   const list = await baseCountries(opts);
-  const currencies = [...new Set(list.map((c) => c.currency))];
+  const currencies = cashwyre.configured() ? [...new Set(list.map((c) => c.currency))] : [];
   const balances = Object.fromEntries(
     await Promise.all(currencies.map(async (cur) => [cur, await businessBalance(debitWalletFor(cur))])),
   );
   return list.map((c) => {
+    if (viaKuda(c.code)) return { ...c, wallet: 'KUDA', available: true, provider: 'kuda' };
     const b = balances[c.currency];
     return { ...c, wallet: debitWalletFor(c.currency), available: b === null || b === undefined ? null : b > 0 };
   });
@@ -209,6 +218,20 @@ function debitWalletFor(destCurrency) {
   return destCurrency === 'NGN' ? 'NGN' : 'SLE';
 }
 
+/**
+ * Bank transfers to Nigeria go through Kuda Business (from the Kuda main
+ * account) once KUDA_* is set; everything else through Cashwyre.
+ */
+const viaKuda = (country, accountType = 'bank') => country === 'NG' && accountType === 'bank' && kuda.configured();
+
+/** Kuda's NIP fee for a transfer of [naira] (Kuda Business API pricing). */
+function kudaFee(naira) {
+  if (naira <= 10_000) return 15;
+  if (naira <= 100_000) return 12;
+  if (naira <= 400_000) return 10;
+  return 9;
+}
+
 const BALANCE_TTL = 30 * 1000;
 const balanceCache = new Map();
 const lowAlertAt = new Map();
@@ -257,7 +280,7 @@ async function checks(user, charge) {
   const service = serviceFor(user);
   assertServiceOpen(service, settings);
   assertCanTransact(user, settings);
-  if (!cashwyre.configured()) {
+  if (!cashwyre.configured() && !kuda.configured()) {
     throw unavailable('Transfers are not connected yet. Please try again later.', 'PROVIDER_NOT_CONFIGURED');
   }
   if (charge !== undefined) await assertWithinLimits(user, service, charge, settings);
@@ -272,31 +295,56 @@ async function checks(user, charge) {
  * What a transfer of [amount] (recipient's currency) costs the sender, and
  * where the money goes: Cashwyre's fee and rate, Dalabapay's fee.
  */
-async function price(user, dest, { amount, accountNumber = '' }, settings) {
-  const fee = await cashwyre.payoutFee({ currency: dest.currency, amount, accountNumber });
+async function price(user, dest, { amount, accountNumber = '', accountType = 'bank' }, settings) {
   const userCur = currencyOf(user.country);
-  const debitWallet = debitWalletFor(dest.currency);
-  const walletCurrency = debitWallet;
-  const totalLocal = fee.totalDebitLocal > 0 ? fee.totalDebitLocal : amount + fee.feeLocal;
-
   const pricing = settings.cashwyre || {};
-  let cost; // Cashwyre's total, in the sender's currency
+  let cost; // the provider's total, in the sender's currency
   let perUsd = null;
-  let cashwyreFeeSender; // Cashwyre's fee, in the sender's currency
-  if (userCur === dest.currency) {
-    cost = totalLocal;
-    cashwyreFeeSender = fee.feeLocal;
+  let cashwyreFeeSender; // the provider's fee, in the sender's currency
+  let fee;
+  let debitWallet;
+  let walletCurrency;
+  let totalLocal;
+
+  if (viaKuda(dest.code, accountType)) {
+    // Paid in Naira from the Kuda account: amount + Kuda's transfer fee,
+    // converted at the Leones/Naira rate (via the dollar rates).
+    const feeNaira = kudaFee(amount);
+    totalLocal = amount + feeNaira;
+    fee = { feeLocal: feeNaira, totalDebitLocal: totalLocal, totalDebitUsd: 0, feeUsd: 0, fxRate: null, fxRateInfo: null, provider: 'kuda' };
+    debitWallet = '';
+    walletCurrency = 'KUDA';
+    if (userCur === dest.currency) {
+      cost = totalLocal;
+      cashwyreFeeSender = feeNaira;
+    } else {
+      const [mine, naira] = await Promise.all([usdRate(userCur, 'sell'), usdRate('NGN', 'buy')]);
+      perUsd = mine;
+      const perNaira = mine / naira;
+      cost = totalLocal * perNaira;
+      cashwyreFeeSender = feeNaira * perNaira;
+    }
   } else {
-    if (!(fee.totalDebitUsd > 0)) throw unavailable('We couldn\'t price this transfer right now. Please try again.', 'FX_UNAVAILABLE');
-    perUsd = await usdRate(userCur, 'sell');
-    cost = fee.totalDebitUsd * perUsd;
-    cashwyreFeeSender = fee.feeUsd > 0 ? fee.feeUsd * perUsd : totalLocal > 0 ? (fee.feeLocal / totalLocal) * cost : 0;
+    fee = await cashwyre.payoutFee({ currency: dest.currency, amount, accountNumber });
+    debitWallet = debitWalletFor(dest.currency);
+    walletCurrency = debitWallet;
+    totalLocal = fee.totalDebitLocal > 0 ? fee.totalDebitLocal : amount + fee.feeLocal;
+    if (userCur === dest.currency) {
+      cost = totalLocal;
+      cashwyreFeeSender = fee.feeLocal;
+    } else {
+      if (!(fee.totalDebitUsd > 0)) throw unavailable('We couldn\'t price this transfer right now. Please try again.', 'FX_UNAVAILABLE');
+      perUsd = await usdRate(userCur, 'sell');
+      cost = fee.totalDebitUsd * perUsd;
+      cashwyreFeeSender = fee.feeUsd > 0 ? fee.feeUsd * perUsd : totalLocal > 0 ? (fee.feeLocal / totalLocal) * cost : 0;
+    }
   }
   // What leaves the Cashwyre wallet (amount + Cashwyre's fee), in that
   // wallet's currency. Converted totals are estimates, so only a wallet
   // clearly too low (under 90% of it) stops the transfer.
   let needed = 0;
-  if (walletCurrency === dest.currency) needed = totalLocal;
+  if (walletCurrency === 'KUDA') needed = 0; // Kuda says no if the account is short; the customer is refunded
+  else if (walletCurrency === dest.currency) needed = totalLocal;
   else if (walletCurrency === userCur) needed = cost * 0.9;
   const withFx = userCur === dest.currency ? cost : cost * (1 + (pricing.fxMarginPercent || 0) / 100);
   const charge = roundUp(withFx * (1 + (pricing.payoutFeePercent || 0) / 100));
@@ -313,8 +361,9 @@ async function price(user, dest, { amount, accountNumber = '' }, settings) {
       feeCurrency: dest.currency,
       feeInYourCurrency: cashwyreFee / 100,
       feeUsd: fee.feeUsd || null,
-      totalDebit: walletCurrency === dest.currency ? totalLocal : Math.round(cost * 100) / 100,
-      wallet: walletCurrency,
+      totalDebit: walletCurrency === dest.currency || walletCurrency === 'KUDA' ? totalLocal : Math.round(cost * 100) / 100,
+      wallet: walletCurrency === 'KUDA' ? 'NGN' : walletCurrency,
+      provider: fee.provider || 'cashwyre',
       rate: fee.fxRate || null, // units of the recipient's currency per $1
       rateInfo: fee.fxRateInfo,
     },
@@ -334,8 +383,8 @@ async function preview(user, { country, amount, sendAmount, accountType }) {
   if (accountType === 'mobile_money' && dest.mobileMoney === false) {
     throw badRequest(`Mobile money transfers to ${dest.name} aren't available.`, 'METHOD_NOT_SUPPORTED');
   }
-  if (amount !== undefined && amount !== null) return (await price(user, dest, { amount }, settings)).breakdown;
-  return solveForSend(user, dest, sendAmount, settings);
+  if (amount !== undefined && amount !== null) return (await price(user, dest, { amount, accountType: accountType || 'bank' }, settings)).breakdown;
+  return solveForSend(user, dest, sendAmount, settings, accountType || 'bank');
 }
 
 // Currencies without cents.
@@ -347,16 +396,16 @@ const floorTo = (v, cur) => (WHOLE_UNITS.has(cur) ? Math.floor(v + 1e-9) : Math.
  * [sendAmount] in the sender's currency, fees included. The price isn't a
  * straight line (fixed + % fees), so it is solved in a few steps.
  */
-async function solveForSend(user, dest, sendAmount, settings) {
+async function solveForSend(user, dest, sendAmount, settings, accountType = 'bank') {
   const target = Math.round(Number(sendAmount) * 100); // sender's minor units
   const probe = WHOLE_UNITS.has(dest.currency) ? 10000 : 100;
   const unit = WHOLE_UNITS.has(dest.currency) ? 1 : 0.01;
-  let p = await price(user, dest, { amount: probe }, settings);
+  let p = await price(user, dest, { amount: probe, accountType }, settings);
   let a = floorTo((probe * target) / p.charge, dest.currency);
   let best = null; // largest amount found that fits in [target]
   for (let i = 0; i < 6 && a > 0; i += 1) {
     // eslint-disable-next-line no-await-in-loop
-    p = await price(user, dest, { amount: a }, settings);
+    p = await price(user, dest, { amount: a, accountType }, settings);
     if (p.charge <= target && (!best || a > best.a)) best = { a, p };
     const next = floorTo((a * target) / p.charge, dest.currency);
     if (p.charge <= target && next <= a) break;
@@ -365,7 +414,7 @@ async function solveForSend(user, dest, sendAmount, settings) {
   if (best) {
     // Rounding can leave one cent on the table: try one step up.
     const up = floorTo(best.a + unit, dest.currency);
-    const pu = await price(user, dest, { amount: up }, settings);
+    const pu = await price(user, dest, { amount: up, accountType }, settings);
     if (pu.charge <= target) best = { a: up, p: pu };
   }
   if (!best) {
@@ -377,6 +426,14 @@ async function solveForSend(user, dest, sendAmount, settings) {
 
 /** The account holder's name from the bank / mobile money provider. */
 async function lookupName({ country, bankCode, accountNumber }) {
+  if (viaKuda(country, 'bank')) {
+    try {
+      const r = await kuda.nameEnquiry({ bankCode, accountNumber });
+      return { accountName: r.accountName, verified: true, sessionId: r.sessionId };
+    } catch (e) {
+      return { accountName: null, verified: false, message: e instanceof AppError && e.code === 'PROVIDER_DECLINED' ? e.message : null };
+    }
+  }
   try {
     const name = await cashwyre.accountLookup({ country, bankCode, accountNumber });
     return name ? { accountName: String(name).trim(), verified: true } : { accountName: null, verified: false };
@@ -410,7 +467,7 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
   }
   if (!name || name.length < 2) throw badRequest('Enter the account holder\'s name.', 'ACCOUNT_NAME_REQUIRED');
 
-  const p = await price(user, dest, { amount, accountNumber }, settings);
+  const p = await price(user, dest, { amount, accountNumber, accountType }, settings);
   await assertBusinessFunds(dest, p.walletCurrency, p.needed);
   const { charge, debitWallet, walletCurrency, needed, userCur } = p;
   await assertWithinLimits(user, serviceFor(user), charge, settings);
@@ -434,6 +491,8 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
     chargeCurrency: userCur,
     rate: p.breakdown.rate,
     serviceFee: Math.round(((p.breakdown.cashwyre.feeInYourCurrency || 0) + (p.breakdown.dalabapayFee || 0)) * 100) / 100,
+    provider: viaKuda(dest.code, accountType) ? 'kuda' : 'cashwyre',
+    sessionId: looked.sessionId || null,
   };
   const token = jwt.sign({ sub: String(user._id), q }, env.jwtSecret, { expiresIn: QUOTE_TTL, audience: 'payout-quote' });
   return {
@@ -511,7 +570,7 @@ async function send(user, { quoteToken, pin }) {
       service,
       recipient: q.accountNumber,
       description,
-      provider: 'cashwyre',
+      provider: q.provider || 'cashwyre',
       balanceBefore: before,
       balanceAfter: after,
       metadata: {
@@ -537,6 +596,10 @@ async function send(user, { quoteToken, pin }) {
   }
 
   const cur = txn.currency;
+  if (q.provider === 'kuda') {
+    await sendWithKuda(txn, q, { user, description });
+    return Transaction.findById(txn._id);
+  }
   try {
     const r = await cashwyre.initiatePayout({
       reference,
@@ -583,6 +646,54 @@ async function send(user, { quoteToken, pin }) {
   return Transaction.findById(txn._id);
 }
 
+/** Bank transfer to Nigeria from the Kuda Business account. */
+async function sendWithKuda(txn, q, { user, description }) {
+  const cur = txn.currency;
+  try {
+    const r = await kuda.transfer({
+      requestRef: txn.reference, // short and alphanumeric, as Kuda asks
+      bankCode: q.bankCode,
+      accountNumber: q.accountNumber,
+      accountName: q.accountName,
+      amountKobo: Math.round(q.amount * 100),
+      narration: q.narration || `Dalabapay ${txn.reference}`,
+      sessionId: q.sessionId,
+    });
+    if (r.transactionReference) {
+      txn.providerReference = String(r.transactionReference);
+      await txn.save();
+    }
+    try {
+      await checkPayout(await Transaction.findById(txn._id));
+    } catch {
+      // the sweeper will settle it
+    }
+  } catch (e) {
+    if (e instanceof AppError) {
+      txn.metadata = { ...txn.metadata, failureReason: e.message };
+      await txn.save();
+      await refundTransaction(txn, { reason: e.message, status: 'failed' });
+      throw badRequest(`The transfer was declined: ${e.message}. Your wallet has been refunded.`, 'TRANSFER_DECLINED');
+    }
+    // No answer: it may have gone through. Never resend; the status check
+    // (TSQ) settles it.
+    await raiseAlert({
+      type: 'provider',
+      severity: 'warning',
+      title: 'Kuda did not respond',
+      body: `${txn.reference} (${description}, ${formatMoney(q.charge, cur)}) is pending: ${e.message}. It will be checked with Kuda.`,
+      user: user._id,
+      transaction: txn._id,
+    });
+  }
+  await notify(user._id, {
+    title: 'Transfer on its way',
+    body: `₦${q.amount.toFixed(2)} to ${q.accountName} (${q.bankName}) is being processed.`,
+    kind: 'payment',
+    data: { transactionId: String(txn._id) },
+  });
+}
+
 // ── Settling ───────────────────────────────────────────────
 
 /** Moves a pending payout to success, or failed with a refund. */
@@ -620,7 +731,9 @@ async function settle(txn, state, message, { actor = null } = {}) {
 /** Asks Cashwyre about a pending payout and settles it. */
 async function checkPayout(txn, { actor = null } = {}) {
   if (txn.status !== 'pending' || txn.type !== 'payout') return { result: txn.status, message: 'Not a pending transfer.' };
-  const r = await cashwyre.payoutStatus({ reference: txn.reference, transactionReference: txn.providerReference });
+  const r = txn.provider === 'kuda'
+    ? await kuda.transferStatus({ requestRef: txn.reference, thirdParty: !kuda.isKudaBank((txn.metadata || {}).bankName) })
+    : await cashwyre.payoutStatus({ reference: txn.reference, transactionReference: txn.providerReference });
   await settle(txn, r.status, r.message, { actor });
   return { result: r.status, message: r.message };
 }

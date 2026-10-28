@@ -115,6 +115,15 @@ const env = {
   // This server's public address, for links in admin webhook messages
   // (Render sets RENDER_EXTERNAL_URL itself).
   publicUrl: clean(process.env.PUBLIC_URL) || clean(process.env.RENDER_EXTERNAL_URL),
+  // Kuda Business (Nigeria): Add Money account numbers (PAYMENT_PROVIDER=kuda)
+  // and bank transfers to Nigeria (used automatically once these are set).
+  kuda: {
+    email: clean(process.env.KUDA_EMAIL),
+    apiKey: clean(process.env.KUDA_API_KEY),
+    accountNumber: clean(process.env.KUDA_ACCOUNT_NUMBER),
+    env: clean(process.env.KUDA_ENV).toLowerCase() === 'uat' ? 'uat' : 'live',
+    webhookToken: clean(process.env.KUDA_WEBHOOK_TOKEN),
+  },
   adminWebhook: {
     url: clean(process.env.ADMIN_WEBHOOK_URL),
     secret: clean(process.env.ADMIN_WEBHOOK_SECRET),
