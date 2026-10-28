@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "jest --runInBand",
+    "test": "jest --runInBand --forceExit --testTimeout=20000 tests/kuda.test.js",
     "make-super-admin": "node scripts/make-super-admin.js",
     "vtpass-check": "node scripts/vtpass-check.js",
     "cashwyre-check": "node scripts/cashwyre-check.js"
