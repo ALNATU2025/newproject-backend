@@ -11,6 +11,7 @@ const { clearPayoutCache } = require('../src/services/payouts');
 useDatabase('kuda');
 
 const HOOK = 'kudahook_0123456789abcdef';
+const mark = (m) => process.stdout.write(`::warning::KUDA ${m}\n`);
 const calls = [];
 let nextAccount = 7000001000;
 const transfers = {}; // requestRef → status word
@@ -22,6 +23,7 @@ function reply(status, body) {
 }
 
 async function fakeKuda(url, opts) {
+  mark(`fetch ${url} ${String(opts && opts.body).slice(0, 80)}`);
   if (url.endsWith('/Account/GetToken')) {
     calls.push({ service: 'TOKEN', body: JSON.parse(opts.body) });
     return reply(200, jwt.sign({ sub: 'biz' }, 'x', { expiresIn: '1h' }));
@@ -54,6 +56,7 @@ async function fakeKuda(url, opts) {
 }
 
 beforeAll(() => {
+  mark('beforeAll');
   Object.assign(env.kuda, { email: 'biz@example.com', apiKey: 'kuda_test_key', accountNumber: '3002991121', env: 'uat', webhookToken: HOOK });
   env.cashwyre.fxFallback = { SLE: 24, NGN: 1500 };
   kuda.setFetch(fakeKuda);
@@ -72,6 +75,7 @@ beforeEach(() => {
 
 describe('Add Money (Nigeria): own Kuda account number', () => {
   test('created the first time Add Money opens, no ID check, kept afterwards', async () => {
+    mark('start created the first time Add Money opens, ');
     const u = await readyUser({});
     const w = (await api().get('/api/wallet').set(auth(u.token))).body.data;
     expect(w.dedicatedAccount).toEqual(expect.objectContaining({ accountNumber: expect.stringMatching(/^7\d{9}$/), bankName: 'Kuda MFB' }));
@@ -90,6 +94,7 @@ describe('Add Money (Nigeria): own Kuda account number', () => {
   });
 
   test('money sent to it is credited once (webhook with the secret URL)', async () => {
+    mark('start money sent to it is credited once (webho');
     const u = await readyUser({});
     const acct = (await api().get('/api/wallet').set(auth(u.token))).body.data.dedicatedAccount.accountNumber;
     const before = (await balanceOf(u.token)).balance;
@@ -125,6 +130,7 @@ describe('Transfers to Nigerian banks (Sierra Leone accounts) through Kuda', () 
   });
 
   test('Nigeria offered with Kuda\'s bank list; the name comes from Kuda', async () => {
+    mark('start Nigeria offered with Kuda\'s bank list; ');
     const u = await sl();
     const c = (await api().get('/api/payouts/countries').set(auth(u.token))).body.data;
     expect(c.connected).toBe(true);
@@ -136,6 +142,7 @@ describe('Transfers to Nigerian banks (Sierra Leone accounts) through Kuda', () 
   });
 
   test('priced in Leones (₦ amount + Kuda fee at the rate), sent from the Kuda account, settled by TSQ', async () => {
+    mark('start priced in Leones (₦ amount + Kuda fee at');
     const u = await sl();
     const q = await quote(u);
     expect(q.status).toBe(200);
@@ -159,6 +166,7 @@ describe('Transfers to Nigerian banks (Sierra Leone accounts) through Kuda', () 
   });
 
   test('declined by Kuda: refunded straight away', async () => {
+    mark('start declined by Kuda: refunded straight away');
     const u = await sl();
     const q = await quote(u, { amount: 500 });
     transferMode = 'decline';
@@ -168,6 +176,7 @@ describe('Transfers to Nigerian banks (Sierra Leone accounts) through Kuda', () 
   });
 
   test('no answer from Kuda: stays pending (never resent) until TSQ knows', async () => {
+    mark('start no answer from Kuda: stays pending (neve');
     const u = await sl();
     const q = await quote(u, { amount: 700 });
     transferMode = 'timeout';
@@ -184,6 +193,7 @@ describe('Transfers to Nigerian banks (Sierra Leone accounts) through Kuda', () 
   });
 
   test('an account Kuda can\'t find is refused before paying', async () => {
+    mark('start an account Kuda can\'t find is refused b');
     const u = await sl();
     const q = await quote(u, { accountNumber: '0000000000' });
     expect(q.body.code).toBe('ACCOUNT_NOT_VERIFIED');
