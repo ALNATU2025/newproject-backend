@@ -1,4 +1,4 @@
-const __m = (m) => { if (process.env.NODE_ENV === 'test') require('fs').writeSync(1, `::warning::KUDA P ${m}\n`); };
+const __m = (m) => { if (process.env.NODE_ENV === 'test') require('fs').appendFileSync('/tmp/marks.txt', `P ${m}\n`); };
 // Transfers to bank accounts and mobile money wallets in other countries
 // (and at home), sent through Cashwyre.
 //

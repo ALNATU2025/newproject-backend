@@ -11,7 +11,7 @@ const { clearPayoutCache } = require('../src/services/payouts');
 useDatabase('kuda');
 
 const HOOK = 'kudahook_0123456789abcdef';
-const mark = (m) => require('fs').writeSync(1, `::warning::KUDA ${m}\n`);
+const mark = (m) => require('fs').appendFileSync('/tmp/marks.txt', `T ${m}\n`);
 const calls = [];
 let nextAccount = 7000001000;
 const transfers = {}; // requestRef → status word
