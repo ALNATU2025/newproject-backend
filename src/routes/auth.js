@@ -400,29 +400,12 @@ function maskEmail(email) {
   return `${shown}${'•'.repeat(Math.max(2, Math.min(6, name.length - shown.length)))}@${domain}`;
 }
 
-function maskPhone(e164) {
-  const v = String(e164 || '');
-  return v.length > 6 ? `${v.slice(0, 4)} ••• ${v.slice(-3)}` : v;
-}
-
 /**
- * Starts the new-device check and returns what the app needs for the code
- * screen. Sierra Leone: an SMS code to the account's phone (Firebase Phone
- * Auth in the app). Nigeria: a code emailed to the account.
+ * Starts the new-device check: a 6-digit code emailed to the account
+ * (Nigeria and Sierra Leone). Returns what the app needs for the code screen.
+ * (Challenges marked 'sms' from older builds are still accepted below.)
  */
 async function startDeviceCheck(user, d) {
-  if (user.country === 'SL' && env.firebase.projectId) {
-    const phoneE164 = toE164(user.phone, 'SL');
-    const challenge = jwt.sign({ uid: String(user._id), dh: d.idHash, m: 'sms' }, env.jwtSecret, { audience: DEVICE_AUD, expiresIn: '15m' });
-    return {
-      verification: 'device',
-      method: 'sms',
-      challenge,
-      phoneE164,
-      phone: maskPhone(phoneE164),
-      message: `New device detected. We'll text a 6-digit code to ${maskPhone(phoneE164)}. Enter it to log in.`,
-    };
-  }
   let extra = {};
   try {
     extra = await otp.issueCode(user.email, 'new_device');

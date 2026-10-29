@@ -156,10 +156,9 @@ const DEFAULTS = {
     bankName: 'Kuda Bank',
   },
 
-  // Login on a new device needs a code (email for Nigeria, SMS for Sierra
-  // Leone). Off until email delivery works (verified Resend domain).
-  // Admin → Transaction Limits → New device code.
-  deviceCheck: { enabled: false },
+  // Login on a new device needs a 6-digit code sent to the account's email
+  // (both countries). Admin → Transaction Limits → New device code.
+  deviceCheck: { enabled: true },
 
   lowBalanceAlerts: true,
   lowBalanceThreshold: 50_000 * NAIRA,
