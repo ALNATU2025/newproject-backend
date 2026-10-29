@@ -52,10 +52,17 @@ const env = {
   isProd,
   isTest,
   port: Number(process.env.PORT || 4000),
-  corsOrigins: (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
+  // Browsers allowed to call the API: the Dalabapay website is always
+  // allowed; CORS_ORIGINS adds more (comma-separated).
+  corsOrigins: [
+    'https://dalabapay.com',
+    'https://www.dalabapay.com',
+    'https://dalabapay-web.onrender.com',
+    ...(process.env.CORS_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim().replace(/\/+$/, ''))
+      .filter(Boolean),
+  ],
 
   mongoUri: required('MONGO_URI', 'mongodb://127.0.0.1:27017/dalabapay'),
 
