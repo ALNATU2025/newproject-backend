@@ -10,6 +10,7 @@ const { requireAuth, signToken } = require('../middleware/auth');
 const { asyncHandler, ok, referralCodeFor } = require('../utils/helpers');
 const { badRequest, unauthorized, conflict, forbidden } = require('../utils/errors');
 const otp = require('../services/otp');
+const { isMailConfigured } = require('../services/mail');
 const pinService = require('../services/pin');
 const { raiseAlert } = require('../services/alerts');
 const { notify } = require('../services/notify');
@@ -85,15 +86,22 @@ router.post(
     }
     const passwordHash = await bcrypt.hash(password, 10);
     const payload = { fullName, email, phone, passwordHash, referrerId, country };
-    const method = verificationFor(country);
+    let method = verificationFor(country);
+    const device = deviceFrom(req);
+    // The website can't use Firebase SMS / email links: it gets the 6-digit
+    // email code (our own email) whenever email is set up.
+    if (device && device.platform === 'web' && method !== 'twilio' && isMailConfigured()) method = 'email';
     if (method === 'firebase') {
-      // The person picks SMS or email in the app; Firebase sends it and the
-      // app comes back with /register/verify-phone or /verify-email-link.
+      // The person picks SMS or email in the app; Firebase sends the SMS and
+      // the app comes back with /register/verify-phone. Email is our own
+      // 6-digit code (/register/use-email-code) for current apps, or the
+      // Firebase link for older ones.
       await otp.savePending(email, 'register', payload);
+      const emailOption = device && isMailConfigured() ? 'email' : 'email_link';
       return ok(res, {
         email,
         verification: 'choose',
-        options: ['sms', 'email_link'],
+        options: ['sms', emailOption],
         phoneE164: toE164(phone, country),
         message: 'Choose how to verify your account.',
       });
@@ -316,12 +324,30 @@ router.post(
   }),
 );
 
+/**
+ * "Email me a code" (instead of SMS): emails a 6-digit code for this
+ * sign-up; the app then finishes with /register/verify.
+ */
 router.post(
-  '/register/resend',
+  '/register/use-email-code',
   validate({ body: z.object({ email: fields.email }) }),
   asyncHandler(async (req, res) => {
+    if (!isMailConfigured()) throw badRequest('Email codes aren\'t available. Please use the SMS code.', 'EMAIL_UNAVAILABLE');
     const p = await otp.pendingPayload(req.body.email, 'register');
-    const method = p ? verificationFor(p.country) : 'email';
+    if (!p) throw badRequest('This sign-up has expired. Please start again.', 'CODE_EXPIRED');
+    // The first email code comes straight away; repeats wait like Resend.
+    const first = !p.emailCodeSent;
+    const extra = await otp.issueCode(req.body.email, 'register', { ...p, emailCodeSent: true }, { skipWait: first });
+    ok(res, { email: p.email, verification: 'email', message: `We sent a 6-digit code to ${p.email}.`, ...extra });
+  }),
+);
+
+router.post(
+  '/register/resend',
+  validate({ body: z.object({ email: fields.email, method: z.enum(['email']).optional() }) }),
+  asyncHandler(async (req, res) => {
+    const p = await otp.pendingPayload(req.body.email, 'register');
+    const method = req.body.method === 'email' || (p && p.emailCodeSent) ? 'email' : p ? verificationFor(p.country) : 'email';
     if (method === 'twilio') {
       await twilio.sendCode(toE164(p.phone, p.country));
       return ok(res, { message: 'A new code is on its way.', verification: 'sms_code', phoneE164: toE164(p.phone, p.country) });

@@ -173,3 +173,55 @@ describe('new device login: email code in both countries', () => {
     expect(ok.body.data.token).toBeTruthy();
   });
 });
+
+describe('sign-up with our own email code (website and "Email me a code")', () => {
+  const sent = [];
+  let realFetch;
+  beforeAll(() => {
+    env.resendApiKey = 're_test_key';
+    realFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      if (String(url).includes('api.resend.com')) {
+        sent.push(JSON.parse(opts.body));
+        return { ok: true, status: 200, text: async () => '{"id":"x"}', json: async () => ({ id: 'x' }) };
+      }
+      return realFetch(url, opts);
+    };
+  });
+  afterAll(() => {
+    env.resendApiKey = '';
+    global.fetch = realFetch;
+  });
+  const codeFor = (email) => {
+    const m = [...sent].reverse().find((x) => x.to.includes(email));
+    return m && (m.subject.match(/(\d{6})/) || [])[1];
+  };
+  const web = { 'X-Device-Id': 'w'.repeat(32), 'X-Device-Platform': 'web' };
+  const phoneApp = { 'X-Device-Id': 'p'.repeat(32), 'X-Device-Platform': 'android' };
+
+  test('the website gets a 6-digit email code (no Firebase needed)', async () => {
+    env.signupVerification = 'firebase';
+    const r = await api().post('/api/auth/register').set(web).send(details(81, { email: 'web81@example.com', phone: '08030000081' }));
+    expect(r.body.data.verification).toBe('email');
+    const v = await api().post('/api/auth/register/verify').set(web).send({ email: 'web81@example.com', code: codeFor('web81@example.com') });
+    expect(v.status).toBe(201);
+    expect(v.body.data.token).toBeTruthy();
+  });
+
+  test('the phone app can choose SMS or an email code', async () => {
+    env.signupVerification = 'firebase';
+    const r = await api().post('/api/auth/register').set(phoneApp).send(details(82, { email: 'app82@example.com', phone: '08030000082' }));
+    expect(r.body.data).toEqual(expect.objectContaining({ verification: 'choose', options: ['sms', 'email'] }));
+    const e = await api().post('/api/auth/register/use-email-code').send({ email: 'app82@example.com' });
+    expect(e.status).toBe(200);
+    expect(e.body.data.verification).toBe('email');
+    const v = await api().post('/api/auth/register/verify').set(phoneApp).send({ email: 'app82@example.com', code: codeFor('app82@example.com') });
+    expect(v.status).toBe(201);
+  });
+
+  test('older apps (no device id) still get the Firebase link option', async () => {
+    env.signupVerification = 'firebase';
+    const r = await api().post('/api/auth/register').send(details(83, { email: 'old83@example.com', phone: '08030000083' }));
+    expect(r.body.data.options).toEqual(['sms', 'email_link']);
+  });
+});

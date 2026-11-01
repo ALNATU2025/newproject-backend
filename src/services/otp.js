@@ -16,9 +16,9 @@ const MAX_ATTEMPTS = 5;
  * Returns `{ devCode }` when email isn't configured outside production so
  * the app can be tested without SMTP.
  */
-async function issueCode(email, purpose, payload = null) {
+async function issueCode(email, purpose, payload = null, { skipWait = false } = {}) {
   const existing = await Otp.findOne({ email, purpose });
-  if (existing && Date.now() - existing.updatedAt.getTime() < RESEND_AFTER_MS) {
+  if (!skipWait && existing && Date.now() - existing.updatedAt.getTime() < RESEND_AFTER_MS) {
     throw tooMany('Please wait a moment before requesting another code.');
   }
   const code = numericCode(6);
