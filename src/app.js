@@ -41,7 +41,16 @@ function createApp() {
   // Account level upgrades carry document photos.
   app.use('/api/tiers', express.json({ limit: '12mb' }));
   app.use(express.json({ limit: '200kb' }));
-  if (!env.isTest) app.use(morgan(env.isProd ? 'combined' : 'dev'));
+  // Request log without secret tokens in the URL (webhook / action links).
+  // eslint-disable-next-line global-require
+  const security = require('./middleware/security');
+  morgan.token('safe-url', security.safeUrl);
+  if (!env.isTest) {
+    app.use(morgan(env.isProd
+      ? ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
+      : ':method :safe-url :status :response-time ms'));
+  }
+  app.use('/api', security.noStore, security.rejectOperators, security.apiLimiter);
 
   // Plain status for a browser or uptime monitor. No secrets — only yes/no.
   const status = () => {

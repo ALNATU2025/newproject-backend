@@ -8,7 +8,7 @@ const { User, QuickLogin } = require('../models');
 const { validate, z, fields } = require('../middleware/validate');
 const { requireAuth, signToken } = require('../middleware/auth');
 const { asyncHandler, ok, referralCodeFor } = require('../utils/helpers');
-const { badRequest, unauthorized, conflict, forbidden } = require('../utils/errors');
+const { AppError, badRequest, unauthorized, conflict, forbidden } = require('../utils/errors');
 const otp = require('../services/otp');
 const { getSettings } = require('../services/settings');
 const { isMailConfigured } = require('../services/mail');
@@ -157,6 +157,22 @@ router.post(
 // Several wrong passwords for one account in a short time look like
 // someone guessing: tell the admins (once per burst).
 const failedLogins = new Map(); // userId → { count, first }
+const lockedUntil = new Map(); // userId → time the lock ends
+const LOCK_AFTER = 10;
+const LOCK_MS = 15 * 60 * 1000;
+
+function assertNotLocked(user) {
+  const key = String(user._id);
+  const until = lockedUntil.get(key);
+  if (!until) return;
+  if (Date.now() >= until) {
+    lockedUntil.delete(key);
+    failedLogins.delete(key);
+    return;
+  }
+  const mins = Math.ceil((until - Date.now()) / 60000);
+  throw new AppError(429, `Too many wrong passwords. Login is locked for ${mins} more minute${mins === 1 ? '' : 's'}, or reset your password.`, 'ACCOUNT_LOCKED');
+}
 async function noteFailedLogin(user, ip) {
   const key = String(user._id);
   const now = Date.now();
@@ -164,6 +180,15 @@ async function noteFailedLogin(user, ip) {
   const entry = f && now - f.first < 15 * 60 * 1000 ? { ...f, count: f.count + 1 } : { count: 1, first: now };
   failedLogins.set(key, entry);
   if (failedLogins.size > 10000) failedLogins.clear();
+  // 10 wrong passwords in 15 minutes: the account is locked for 15 minutes.
+  if (entry.count >= LOCK_AFTER && !lockedUntil.has(key)) {
+    lockedUntil.set(key, now + LOCK_MS);
+    await notify(user._id, {
+      title: 'Account temporarily locked',
+      body: 'Too many wrong passwords were entered for your account. Login is locked for 15 minutes. If this wasn\'t you, reset your password.',
+      kind: 'security',
+    });
+  }
   if (entry.count === 5) {
     await raiseAlert({
       type: 'suspicious',
@@ -389,6 +414,7 @@ router.post(
         'LEGACY_ACCOUNT',
       );
     }
+    if (user) assertNotLocked(user);
     const okPassword = user && (await bcrypt.compare(req.body.password, user.passwordHash));
     if (!okPassword) {
       if (user) await noteFailedLogin(user, req.ip);
@@ -403,6 +429,7 @@ router.post(
     }
     // A device this account hasn't used before: confirm with a code sent
     // to the account's email before signing in.
+    failedLogins.delete(String(user._id)); // right password: start counting again
     if (await needsVerification(user._id, req)) {
       const d = deviceFrom(req);
       if (!d) {
