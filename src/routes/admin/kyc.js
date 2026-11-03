@@ -41,20 +41,20 @@ router.get(
   requirePermission('users:read'),
   asyncHandler(async (req, res) => {
     const [accounts, upgrades] = await Promise.all([
-      User.countDocuments({ country: 'SL', isApproved: false, approvalNote: null, role: 'user' }),
+      User.countDocuments({ isApproved: false, approvalNote: null, role: 'user' }),
       KycRequest.countDocuments({ status: 'pending' }),
     ]);
     ok(res, { accountsToApprove: accounts, upgradesToReview: upgrades });
   }),
 );
 
-/** Sierra Leone accounts waiting for approval (and turned-down ones). */
+/** New accounts (both countries) waiting for approval, and turned-down ones. */
 router.get(
   '/accounts',
   requirePermission('users:read'),
   validate({ query: z.object({ status: z.enum(['pending', 'rejected']).default('pending') }) }),
   asyncHandler(async (req, res) => {
-    const where = { country: 'SL', isApproved: false, role: 'user', approvalNote: req.query.status === 'pending' ? null : { $ne: null } };
+    const where = { isApproved: false, role: 'user', approvalNote: req.query.status === 'pending' ? null : { $ne: null } };
     const users = await User.find(where).sort({ createdAt: -1 }).limit(200);
     ok(res, users.map((u) => serialize.user(u, { admin: true })));
   }),

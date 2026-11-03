@@ -29,6 +29,12 @@ router.use(['/fund/one-time', '/fund/assisted', '/fund/bank', '/verify-payment']
   next(isSl(req) ? forbidden('Use "Add Money" for Sierra Leone instead.', 'WRONG_COUNTRY') : undefined),
 );
 
+// Adding money waits for the account to be approved, like payments.
+router.post(['/fund/one-time', '/fund/assisted', '/fund/bank'], asyncHandler(async (req, res, next) => {
+  assertCanTransact(req.user, await getSettings());
+  next();
+}));
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -48,7 +54,9 @@ router.get(
     // Kuda issues each customer's account number without an ID check:
     // create it the first time Add Money is opened.
     const provider = paymentProvider();
-    if (provider.kycFree && provider.isConfigured() && !String((req.user.dedicatedAccount || {}).providerRef || '').startsWith('KDA')) {
+    // (Only once the account is approved.)
+    const approved = req.user.isApproved || !settings.requireApproval;
+    if (approved && provider.kycFree && provider.isConfigured() && !String((req.user.dedicatedAccount || {}).providerRef || '').startsWith('KDA')) {
       try {
         req.user.dedicatedAccount = await provider.createDedicatedAccount(req.user);
         await req.user.save();

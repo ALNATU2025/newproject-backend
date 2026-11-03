@@ -19,7 +19,8 @@ function assertServiceOpen(service, settings) {
 }
 
 function assertCanTransact(user, settings) {
-  // Sierra Leone accounts always wait for an admin's approval.
+  // New accounts wait for an admin's approval (Sierra Leone always; Nigeria
+  // while requireApproval is on).
   if ((settings.requireApproval || user.country === 'SL') && !user.isApproved) {
     throw forbidden(
       'Your account is under review. Payments unlock once it\'s approved — usually within a few minutes.',

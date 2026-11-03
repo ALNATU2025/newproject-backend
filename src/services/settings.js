@@ -10,7 +10,9 @@ const DEFAULTS = {
   services: Object.fromEntries(SERVICES.map((s) => [s, true])),
   maintenance: false,
   maintenanceMessage: 'Some services are paused for maintenance. Please check back soon.',
-  requireApproval: false,
+  // New Nigerian accounts wait for an admin's approval before they can
+  // transact (Sierra Leone accounts always do). Admin → Settings.
+  requireApproval: true,
 
   // % of the purchase amount: `user` is paid to the customer as commission,
   // `platform` is Dalabapay's margin (revenue).

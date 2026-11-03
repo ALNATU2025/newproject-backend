@@ -222,3 +222,34 @@ describe('push notifications and admin webhook', () => {
     expect(m.notification).toEqual({ title: 'New feature', body: 'Dollar cards are here' });
   });
 });
+
+describe('Nigeria: new accounts wait for approval too', () => {
+  test('pending until an admin approves; no payments, no top-ups; admins alerted', async () => {
+    const u = await readyUser({ pending: true });
+    const me = (await api().get('/api/me').set(auth(u.token))).body.data;
+    expect(me.isApproved).toBe(false);
+    const alert = await AdminAlert.findOne({ user: u.user.id, type: 'new_user' });
+    expect(alert.title).toMatch(/Nigeria user to approve/);
+    await User.updateOne({ _id: u.user.id }, { $set: { balance: 5000 * 100 } });
+    const pay = await api().post('/api/services/airtime').set(auth(u.token)).send({ network: 'mtn', phone: '08039999999', amount: 200, pin: u.pin });
+    expect(pay.body.code).toBe('ACCOUNT_PENDING_APPROVAL');
+    const top = await api().post('/api/wallet/fund/assisted').set(auth(u.token)).send({ amount: 1000, pin: u.pin });
+    expect(top.body.code).toBe('ACCOUNT_PENDING_APPROVAL');
+    const list = (await api().get('/api/admin/kyc/accounts').set(auth(admin.token))).body.data;
+    expect(list.map((x) => x.id)).toContain(u.user.id);
+
+    expect((await api().post(`/api/admin/users/${u.user.id}/approve`).set(auth(admin.token))).status).toBe(200);
+    const ok = await api().post('/api/services/airtime').set(auth(u.token)).send({ network: 'mtn', phone: '08039999999', amount: 200, pin: u.pin });
+    expect(ok.status).toBe(201);
+  });
+
+  test('admins can switch Nigerian approval off', async () => {
+    await api().patch('/api/admin/settings').set(auth(admin.token)).send({ requireApproval: false });
+    try {
+      const u = await readyUser({ pending: true });
+      expect((await api().get('/api/me').set(auth(u.token))).body.data.isApproved).toBe(true);
+    } finally {
+      await api().patch('/api/admin/settings').set(auth(admin.token)).send({ requireApproval: true });
+    }
+  });
+});

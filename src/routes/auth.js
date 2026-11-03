@@ -10,6 +10,7 @@ const { requireAuth, signToken } = require('../middleware/auth');
 const { asyncHandler, ok, referralCodeFor } = require('../utils/helpers');
 const { badRequest, unauthorized, conflict, forbidden } = require('../utils/errors');
 const otp = require('../services/otp');
+const { getSettings } = require('../services/settings');
 const { isMailConfigured } = require('../services/mail');
 const pinService = require('../services/pin');
 const { raiseAlert } = require('../services/alerts');
@@ -200,9 +201,9 @@ async function createAccount(p, { phoneVerified = false } = {}) {
     phoneVerified,
     referralCode: await uniqueReferralCode(p.fullName),
     referredBy: p.referrerId || null,
-    // Sierra Leone accounts open at Tier 1 and wait for an admin to
-    // approve them before any money moves.
-    isApproved: p.country !== 'SL',
+    // New accounts wait for an admin to approve them before any money
+    // moves (Sierra Leone always; Nigeria while requireApproval is on).
+    isApproved: p.country === 'SL' ? false : !(await getSettings()).requireApproval,
     tier: 1,
     lastLoginAt: new Date(),
     // Owner accounts listed in SUPER_ADMIN_EMAILS become Super Admin.
@@ -210,19 +211,20 @@ async function createAccount(p, { phoneVerified = false } = {}) {
   });
   await otp.deleteCode(p.email, 'register');
   const sl = user.country === 'SL';
+  const pending = !user.isApproved;
   await raiseAlert({
     type: 'new_user',
-    severity: sl ? 'warning' : 'info',
-    title: sl ? 'New Sierra Leone user to approve' : 'New user registered',
-    body: sl
+    severity: pending ? 'warning' : 'info',
+    title: pending ? `New ${sl ? 'Sierra Leone' : 'Nigeria'} user to approve` : 'New user registered',
+    body: pending
       ? `${user.fullName} (${user.email}, ${user.phone}) signed up. Review and approve the account in Admin → KYC Review.`
       : `${user.fullName} (${user.email}) just signed up.`,
     user: user._id,
   });
   await notify(user._id, {
     title: 'Welcome to Dalabapay',
-    body: sl
-      ? 'Your account is being reviewed. You can look around now; payments open as soon as we approve it (Tier 1).'
+    body: pending
+      ? `Your account is being reviewed. You can look around now; payments open as soon as we approve it${sl ? ' (Tier 1)' : ''}.`
       : 'Set up your payment PIN, add money to your wallet and start paying bills in seconds.',
     kind: 'general',
   });
