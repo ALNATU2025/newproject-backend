@@ -29,6 +29,8 @@ function unsafe(value, depth = 0) {
 }
 
 function rejectOperators(req, res, next) {
+  // Provider webhooks are read field by field; their payloads are theirs.
+  if (req.originalUrl.startsWith('/api/webhooks')) return next();
   if (unsafe(req.body) || unsafe(req.query) || unsafe(req.params)) {
     return res.status(400).json({ success: false, code: 'INVALID_INPUT', message: 'The request contains characters that aren\'t allowed.' });
   }
