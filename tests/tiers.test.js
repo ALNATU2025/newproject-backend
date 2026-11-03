@@ -48,9 +48,9 @@ describe('sign-up and approval', () => {
     expect(t).toEqual(expect.objectContaining({ approved: false, approvalNote: 'Name does not match ID' }));
   });
 
-  test('Nigerian sign-ups are unchanged (approved, no tiers)', async () => {
+  test('Nigerian sign-ups wait for approval and have no tiers', async () => {
     const s = await signUp();
-    expect(s.user.isApproved).toBe(true);
+    expect(s.user.isApproved).toBe(false);
     expect(s.user.tier).toBeNull();
     expect((await api().get('/api/tiers').set(auth(s.token))).body.code).toBe('WRONG_COUNTRY');
   });
