@@ -211,6 +211,7 @@ describe('settings, provider, commission, limits', () => {
     const { superAdmin, support, customer } = await setup();
     const a = auth(superAdmin.token);
     const t = auth(customer.token);
+    await api().post(`/api/admin/users/${customer.user.id}/wallet`).set(a).send({ action: 'credit', amount: 50000, reason: 'Manual Deposit' });
     let card = 7023456780;
     const renew = async () => {
       card += 1; // a different decoder each time (no duplicate block)
