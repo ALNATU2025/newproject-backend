@@ -18,7 +18,8 @@ test('Nigeria: totals, categories and a daily chart in Naira', async () => {
   })).status).toBe(201);
   // A failed one and an old one: counted, but not in the totals.
   await Transaction.create({ user: u.user.id, reference: 'FAILX1', type: 'data', direction: 'debit', amount: 99900, status: 'failed' });
-  await Transaction.create({ user: u.user.id, reference: 'OLDX1', type: 'data', direction: 'debit', amount: 50000, status: 'success', createdAt: new Date(Date.now() - 40 * 86400000) });
+  await Transaction.create({ user: u.user.id, reference: 'OLDX1', type: 'data', direction: 'debit', amount: 50000, status: 'success' });
+  await Transaction.collection.updateOne({ reference: 'OLDX1' }, { $set: { createdAt: new Date(Date.now() - 40 * 86400000) } });
 
   const r = await api().get('/api/transactions/summary').set(t);
   expect(r.status).toBe(200);
