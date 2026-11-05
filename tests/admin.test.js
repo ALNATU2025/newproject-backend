@@ -211,10 +211,12 @@ describe('settings, provider, commission, limits', () => {
     const { superAdmin, support, customer } = await setup();
     const a = auth(superAdmin.token);
     const t = auth(customer.token);
+    let card = 7023456780;
     const renew = async () => {
-      const v = (await api().post('/api/services/cable/verify').set(t).send({ provider: 'gotv', smartcardNumber: '7023456789' })).body.data;
+      card += 1; // a different decoder each time (no duplicate block)
+      const v = (await api().post('/api/services/cable/verify').set(t).send({ provider: 'gotv', smartcardNumber: String(card) })).body.data;
       const r = await api().post('/api/services/cable').set(t).send({
-        provider: 'gotv', smartcardNumber: '7023456789', action: 'renew', months: 1, phone: '08031234567', pin: customer.pin,
+        provider: 'gotv', smartcardNumber: String(card), action: 'renew', months: 1, phone: '08031234567', pin: customer.pin,
       });
       expect(r.status).toBe(201);
       return { amount: v.renewalAmount, commission: r.body.data.transaction.commission };
