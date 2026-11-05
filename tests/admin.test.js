@@ -207,6 +207,39 @@ describe('settings, provider, commission, limits', () => {
     expect(Math.round((air.revenue - base.revenue) * 100) / 100).toBe(10);
   });
 
+  test('Cable TV commission: 0.5% by default, set per user by an admin', async () => {
+    const { superAdmin, support, customer } = await setup();
+    const a = auth(superAdmin.token);
+    const t = auth(customer.token);
+    const renew = async () => {
+      const v = (await api().post('/api/services/cable/verify').set(t).send({ provider: 'gotv', smartcardNumber: '7023456789' })).body.data;
+      const r = await api().post('/api/services/cable').set(t).send({
+        provider: 'gotv', smartcardNumber: '7023456789', action: 'renew', months: 1, phone: '08031234567', pin: customer.pin,
+      });
+      expect(r.status).toBe(201);
+      return { amount: v.renewalAmount, commission: r.body.data.transaction.commission };
+    };
+    const pct = (x, p) => Math.round(x * p) / 100;
+
+    const view = (await api().get(`/api/admin/users/${customer.user.id}`).set(a)).body.data;
+    expect(view.cableCommission).toBeNull();
+    expect(view.cableCommissionDefault).toBe(0.5);
+    let r = await renew();
+    expect(r.commission).toBeCloseTo(pct(r.amount, 0.5), 2);
+
+    // Support staff can't change it; a super admin can.
+    expect((await api().patch(`/api/admin/users/${customer.user.id}`).set(auth(support.token)).send({ cableCommission: 2 })).status).toBe(403);
+    const set = await api().patch(`/api/admin/users/${customer.user.id}`).set(a).send({ cableCommission: 2 });
+    expect(set.body.data.cableCommission).toBe(2);
+    r = await renew();
+    expect(r.commission).toBeCloseTo(pct(r.amount, 2), 2);
+
+    expect((await api().patch(`/api/admin/users/${customer.user.id}`).set(a).send({ cableCommission: 11 })).status).toBe(400);
+    await api().patch(`/api/admin/users/${customer.user.id}`).set(a).send({ cableCommission: null });
+    r = await renew();
+    expect(r.commission).toBeCloseTo(pct(r.amount, 0.5), 2);
+  });
+
   test('default and per-user limits', async () => {
     const { superAdmin, customer } = await setup();
     const a = auth(superAdmin.token);

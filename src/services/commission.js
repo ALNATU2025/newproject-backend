@@ -1,5 +1,5 @@
 // Commission paid to users on purchases, and moving earnings to the wallet.
-const { Transaction } = require('../models');
+const { Transaction, User } = require('../models');
 const { SERVICE_LABELS } = require('../models/constants');
 const { makeReference } = require('../utils/helpers');
 const { percentOf } = require('../utils/money');
@@ -13,10 +13,18 @@ function ratesFor(service, settings) {
   return (settings.commissionRates && settings.commissionRates[service]) || { user: 0, platform: 0 };
 }
 
+/** The % paid to this user: their own Cable TV rate if an admin set one. */
+async function userRateFor(txn, rates) {
+  if (txn.service !== 'cable') return rates.user;
+  const u = await User.findById(txn.user).select('cableCommission').lean();
+  const own = u && u.cableCommission;
+  return typeof own === 'number' && own >= 0 ? own : rates.user;
+}
+
 /** Credits commission for a successful purchase and records revenue. */
 async function payPurchaseCommission(txn, settings) {
   const rates = ratesFor(txn.service, settings);
-  const commission = percentOf(txn.amount, rates.user);
+  const commission = percentOf(txn.amount, await userRateFor(txn, rates));
   const platformRevenue = percentOf(txn.amount, rates.platform);
   txn.commission = commission;
   txn.platformRevenue = platformRevenue;

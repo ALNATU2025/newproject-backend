@@ -14,6 +14,8 @@ const { audit } = require('../../services/alerts');
 const { notify } = require('../../services/notify');
 const { fmt } = require('../../services/limits');
 const serialize = require('../../serializers');
+const { getSettings } = require('../../services/settings');
+const { ratesFor } = require('../../services/commission');
 const { normalizePhone, PHONE_HINT } = require('../../utils/phone');
 
 const router = express.Router();
@@ -100,6 +102,7 @@ router.get(
     ]);
     ok(res, {
       ...serialize.user(u, { admin: true }),
+      cableCommissionDefault: ratesFor('cable', await getSettings()).user,
       transactions,
       lastTransactionAt: (last && last.createdAt) || u.lastTransactionAt || null,
       lastTransaction: last ? last.description : null,
@@ -117,6 +120,8 @@ router.patch(
       email: fields.email.optional(),
       phone: fields.accountPhone.optional(),
       isActive: z.boolean().optional(),
+      // Cable TV commission % for this user; null = back to the default.
+      cableCommission: z.number().min(0).max(10).nullable().optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -130,7 +135,11 @@ router.patch(
     if (req.body.phone && !normalizePhone(req.body.phone, u.country || 'NG')) {
       throw badRequest(PHONE_HINT[u.country || 'NG'], 'VALIDATION_ERROR');
     }
-    const before = { fullName: u.fullName, email: u.email, phone: u.phone, isActive: u.isActive };
+    if (req.body.cableCommission != null && u.country === 'SL') {
+      throw badRequest('Cable TV commission per user is for Nigerian accounts.', 'VALIDATION_ERROR');
+    }
+    if (typeof req.body.cableCommission === 'number') req.body.cableCommission = Math.round(req.body.cableCommission * 100) / 100;
+    const before = { fullName: u.fullName, email: u.email, phone: u.phone, isActive: u.isActive, cableCommission: u.cableCommission ?? null };
     Object.assign(u, req.body);
     if (req.body.isActive === false) u.tokenVersion = (u.tokenVersion || 0) + 1; // log them out
     await u.save();

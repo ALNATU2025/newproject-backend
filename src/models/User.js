@@ -45,6 +45,9 @@ const userSchema = new mongoose.Schema(
     balance: { type: Number, default: 0, min: 0 },
     commissionBalance: { type: Number, default: 0, min: 0 },
     lifetimeCommission: { type: Number, default: 0 },
+    // Cable TV commission % for this user (Nigeria). null = the default rate
+    // in Admin → Service Commission (0.5%). Set per user in Admin → Users.
+    cableCommission: { type: Number, default: null, min: 0, max: 10 },
     commissionWithdrawn: { type: Number, default: 0 },
 
     referralCode: { type: String, unique: true, sparse: true, uppercase: true },

@@ -20,7 +20,7 @@ const DEFAULTS = {
     airtime: { user: 2, platform: 1 },
     data: { user: 2.5, platform: 1.5 },
     electricity: { user: 0.5, platform: 0.5 },
-    cable: { user: 1, platform: 0.5 },
+    cable: { user: 0.5, platform: 0.5 },
     education: { user: 1.5, platform: 1 },
     insurance: { user: 2, platform: 2 },
     international: { user: 1, platform: 2 },

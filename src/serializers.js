@@ -56,6 +56,7 @@ function user(u, { admin = false } = {}) {
   };
   if (admin) {
     out.lifetimeCommission = toNaira(u.lifetimeCommission || 0);
+    out.cableCommission = typeof u.cableCommission === 'number' ? u.cableCommission : null;
     out.pinFailedAttempts = u.pinFailedAttempts || 0;
     out.lastLoginAt = u.lastLoginAt || null;
     out.lastSeenAt = u.lastSeenAt || u.lastLoginAt || null;
