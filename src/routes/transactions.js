@@ -100,24 +100,26 @@ router.get(
     const prevFrom = from - (now - from);
 
     const counted = { status: 'success', wallet: 'main', type: { $ne: 'refund' } };
+    // Money in is what reached the wallet: a deposit less its funding fee.
+    const moved = { $cond: [{ $eq: ['$direction', 'credit'] }, { $subtract: ['$amount', { $ifNull: ['$fee', 0] }] }, '$amount'] };
     const [agg] = await Transaction.aggregate([
       { $match: { user: req.user._id, createdAt: { $gte: new Date(prevFrom) } } },
       {
         $facet: {
           totals: [
             { $match: { createdAt: { $gte: new Date(from) } } },
-            { $group: { _id: { wallet: '$wallet', direction: '$direction', type: '$type', status: '$status' }, amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+            { $group: { _id: { wallet: '$wallet', direction: '$direction', type: '$type', status: '$status' }, amount: { $sum: moved }, count: { $sum: 1 } } },
           ],
           previous: [
             { $match: { createdAt: { $lt: new Date(from) }, ...counted } },
-            { $group: { _id: '$direction', amount: { $sum: '$amount' } } },
+            { $group: { _id: '$direction', amount: { $sum: moved } } },
           ],
           daily: [
             { $match: { createdAt: { $gte: new Date(from) }, ...counted } },
             {
               $group: {
                 _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: tz } }, direction: '$direction' },
-                amount: { $sum: '$amount' },
+                amount: { $sum: moved },
               },
             },
           ],
