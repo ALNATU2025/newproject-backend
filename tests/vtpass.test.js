@@ -16,6 +16,11 @@ const VARIATIONS = {
     { variation_code: 'dstv-padi', name: 'DStv Padi N1,850', variation_amount: '1850.00', fixedPrice: 'Yes' },
     { variation_code: 'dstv79', name: 'DStv  Compact N7900', variation_amount: '7900.00', fixedPrice: 'Yes' },
     { variation_code: 'dstv-xv', name: 'DStv Compact + Extra View N11,900', variation_amount: '11900.00', fixedPrice: 'Yes' },
+    { variation_code: 'dstv-premium', name: 'DStv Premium N44,500', variation_amount: '44500.00', fixedPrice: 'Yes' },
+    { variation_code: 'dstv-sports', name: 'DStv Sports - N12,000', variation_amount: '12000.00', fixedPrice: 'Yes' },
+    { variation_code: 'dstv-starter', name: 'DStv Starter N9,500', variation_amount: '9500.00', fixedPrice: 'Yes' },
+    { variation_code: 'dstv-select', name: 'DStv Select N15,000', variation_amount: '15000.00', fixedPrice: 'Yes' },
+    { variation_code: 'hdpvr-access-service', name: 'DStv HDPVR Access Service N6,000', variation_amount: '6000.00', fixedPrice: 'Yes' },
   ],
   gotv: [
     { variation_code: 'gotv-lite', name: 'GOtv Lite N410', variation_amount: '410.00', fixedPrice: 'Yes' },
@@ -224,9 +229,16 @@ describe('plans and smartcard check', () => {
   test('DStv ExtraView: VTpass\'s hidden, ours paid as a renewal of the exact amount', async () => {
     const u = await readyUser({ fund: 30000 });
     const plans = (await api().get('/api/services/cable/plans?provider=dstv').set(tv(u))).body.data;
-    expect(plans.map((p) => p.code)).toEqual(['dstv-padi', 'dstv79', 'xv-dstv-padi', 'xv-dstv79']);
+    // Select, Starter, Sports, Premium first; the rest cheapest first.
+    // Every bouquet (new ones too) gets an ExtraView; add-ons don't.
+    expect(plans.map((p) => p.code)).toEqual([
+      'dstv-select', 'dstv-starter', 'dstv-sports', 'dstv-premium', 'dstv-padi', 'hdpvr-access-service', 'dstv79',
+      'xv-dstv-select', 'xv-dstv-starter', 'xv-dstv-sports', 'xv-dstv-premium', 'xv-dstv-padi', 'xv-dstv79',
+    ]);
     const xv = plans.find((p) => p.code === 'xv-dstv79');
     expect(xv).toEqual(expect.objectContaining({ name: 'DStv Compact + ExtraView', amount: 7900 + 6000 }));
+    expect(plans.find((p) => p.code === 'xv-dstv-sports')).toEqual(expect.objectContaining({ name: 'DStv Sports + ExtraView', amount: 18000 }));
+    expect(plans.find((p) => p.code === 'xv-dstv-select').name).toBe('DStv Select + ExtraView');
 
     const r = await api().post('/api/services/cable').set(tv(u)).send({
       provider: 'dstv', smartcardNumber: '1212121212', action: 'change', planCode: 'xv-dstv79', months: 1, phone: '08031234567', pin: u.pin,

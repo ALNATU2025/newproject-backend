@@ -214,28 +214,39 @@ router.post(
 // plus the ExtraView fee (Admin → Settings). They're paid to VTpass as a
 // renewal of that exact amount, credited to the decoder's account.
 const EXTRA_VIEW = /extra\s*-?\s*view/i;
-const DSTV_BOUQUETS = { padi: 'Padi', yanga: 'Yanga', confam: 'Confam', compact: 'Compact', 'compact plus': 'Compact Plus', premium: 'Premium' };
+// Add-ons and services, not bouquets: no ExtraView for these.
+const NOT_A_BOUQUET = /hdpvr|add-?\s?on|access\s*service|showmax|box\s*office|great\s*wall|french\s*(touch|plus|11)/i;
+// Shown first, in this order; everything else follows, cheapest first.
+const DSTV_TOP = [/\bselect\b/i, /\bstarter\b/i, /\bsports?\b/i, /\bpremium\b/i];
 
-/** "DStv  Compact Plus N12,400" → "compact plus". */
-function bouquetKey(name) {
+/** "DStv  Compact Plus N12,400" → "Compact Plus". */
+function bouquetLabel(name) {
   return String(name)
-    .toLowerCase()
-    .replace(/[₦n]\s?[\d,]+(\.\d+)?/g, '')
-    .replace(/\bdstv\b/g, '')
+    .replace(/[₦Nn]\s?[\d,]+(\.\d+)?\s*$/g, '')
+    .replace(/\bdstv\b/gi, '')
     .replace(/\s+/g, ' ')
+    .replace(/[\s\-–:]+$/, '')
     .trim();
+}
+
+function topRank(name) {
+  const i = DSTV_TOP.findIndex((re) => re.test(name));
+  return i < 0 ? DSTV_TOP.length : i;
 }
 
 async function cablePlansFor(provider) {
   const list = await p().cablePlans(provider);
   if (provider !== 'dstv') return list;
-  const plain = list.filter((x) => !EXTRA_VIEW.test(x.name));
+  const plain = list
+    .filter((x) => !EXTRA_VIEW.test(x.name))
+    .sort((a, b) => topRank(a.name) - topRank(b.name) || a.amount - b.amount);
   const xv = (await getSettings()).dstvExtraView || {};
   if (xv.enabled === false || !(xv.fee > 0)) return plain;
   const manual = [];
-  for (const [key, label] of Object.entries(DSTV_BOUQUETS)) {
-    const base = plain.find((x) => bouquetKey(x.name) === key);
-    if (!base) continue;
+  for (const base of plain) {
+    if (NOT_A_BOUQUET.test(base.name)) continue;
+    const label = bouquetLabel(base.name);
+    if (!label) continue;
     manual.push({
       code: `xv-${base.code}`,
       name: `DStv ${label} + ExtraView`,
