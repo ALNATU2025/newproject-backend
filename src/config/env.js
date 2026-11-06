@@ -131,6 +131,11 @@ const env = {
     env: clean(process.env.KUDA_ENV).toLowerCase() === 'uat' ? 'uat' : 'live',
     webhookToken: clean(process.env.KUDA_WEBHOOK_TOKEN),
   },
+  // Hawa, the admin AI assistant (Anthropic API).
+  anthropic: {
+    apiKey: clean(process.env.ANTHROPIC_API_KEY),
+    model: clean(process.env.HAWA_MODEL) || 'claude-sonnet-5-5',
+  },
   adminWebhook: {
     url: clean(process.env.ADMIN_WEBHOOK_URL),
     secret: clean(process.env.ADMIN_WEBHOOK_SECRET),

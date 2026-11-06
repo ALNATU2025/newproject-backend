@@ -85,6 +85,7 @@ function createApp() {
         addMoney: env.paymentProvider === 'kuda' ? 'on' : 'off — set PAYMENT_PROVIDER=kuda',
         webhook: env.kuda.webhookToken ? 'set' : 'MISSING — set KUDA_WEBHOOK_TOKEN',
       },
+      hawa: env.anthropic.apiKey ? `on (${env.anthropic.model})` : 'off — set ANTHROPIC_API_KEY',
       vtpass: {
         mode: vt.environment,
         keys: vt.apiKey && vt.publicKey && vt.secretKey ? 'set' : 'MISSING',
