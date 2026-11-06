@@ -7,27 +7,14 @@
 // anything: only GET requests to the paths below are ever made.
 //
 // Env: ANTHROPIC_API_KEY (required), HAWA_MODEL (optional).
-const env = require('../config/env');
 const { can } = require('../permissions');
+const assistant = require('./assistant');
 
-let anthropicFetch = (...a) => fetch(...a);
-/** Tests replace the Anthropic API with a fake. */
-function setAnthropicFetch(fn) {
-  anthropicFetch = fn || ((...a) => fetch(...a));
-}
-
-const MAX_STEPS = 8; // tool rounds per question
-const MAX_RESULT = 14000; // characters of data per tool result
-const OBJECT_ID = /^[a-f0-9]{24}$/i;
+const { needId } = assistant;
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const country = str('NG = Nigeria (Naira ₦), SL = Sierra Leone (Leones Le).', { enum: ['NG', 'SL'] });
 const id = (what) => str(`The ${what} id (24 hex characters) from an earlier result.`);
-
-function needId(v, what) {
-  if (!OBJECT_ID.test(String(v || ''))) throw new Error(`${what} must be an id from an earlier result (24 hex characters). Search first.`);
-  return String(v);
-}
 
 const TOOLS = [
   {
@@ -189,41 +176,8 @@ function systemPrompt(admin) {
   ].join('\n');
 }
 
-class HawaError extends Error {
-  constructor(message, code, status) {
-    super(message);
-    this.code = code;
-    this.status = status;
-  }
-}
-
-async function claude(body) {
-  let r;
-  try {
-    r = await anthropicFetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': env.anthropic.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    throw new HawaError('Hawa could not reach the AI service. Please try again.', 'HAWA_UNAVAILABLE', 502);
-  }
-  const text = await r.text();
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch (e) {
-    json = null;
-  }
-  if (!r.ok || !json) {
-    const why = (json && json.error && json.error.message) || `HTTP ${r.status}`;
-    console.error('[hawa] Anthropic error:', r.status, why);
-    if (r.status === 401 || r.status === 403) throw new HawaError('Hawa\'s AI key was refused. Check ANTHROPIC_API_KEY on Render.', 'HAWA_KEY_REFUSED', 502);
-    if (r.status === 429 || r.status === 529) throw new HawaError('Hawa is busy right now. Please try again in a minute.', 'HAWA_BUSY', 503);
-    throw new HawaError('Hawa could not answer right now. Please try again.', 'HAWA_UNAVAILABLE', 502);
-  }
-  return json;
-}
+/** Same as assistant errors, with HAWA_ codes for the admin app. */
+class HawaError extends assistant.AssistantError {}
 
 /**
  * Answers the last user message.
@@ -232,49 +186,13 @@ async function claude(body) {
  * @param call (path, query) => Promise<any>  GET on this server as the admin
  */
 async function ask({ messages, admin, call }) {
-  if (!env.anthropic.apiKey) {
-    throw new HawaError('Hawa is not set up yet: add ANTHROPIC_API_KEY on Render.', 'HAWA_NOT_CONFIGURED', 503);
+  try {
+    const out = await assistant.run({ name: 'Hawa', system: systemPrompt(admin), tools: toolsFor(admin.role), messages, call });
+    return { reply: out.reply, tools: out.tools };
+  } catch (e) {
+    if (e instanceof assistant.AssistantError) throw new HawaError(e.message, e.code.replace(/^AI_/, 'HAWA_'), e.status);
+    throw e;
   }
-  const tools = toolsFor(admin.role);
-  const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
-  const convo = messages.map((m) => ({ role: m.role, content: m.content }));
-  const used = [];
-
-  for (let step = 0; step < MAX_STEPS; step += 1) {
-    const res = await claude({
-      model: env.anthropic.model,
-      max_tokens: 1500,
-      system: systemPrompt(admin),
-      tools: tools.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
-      messages: convo,
-    });
-    const blocks = Array.isArray(res.content) ? res.content : [];
-    const calls = blocks.filter((b) => b.type === 'tool_use');
-    if (res.stop_reason !== 'tool_use' || !calls.length) {
-      const reply = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-      return { reply: reply || 'Sorry, I could not find an answer to that.', tools: used };
-    }
-    convo.push({ role: 'assistant', content: blocks });
-    const results = [];
-    for (const c of calls) {
-      const tool = byName[c.name];
-      used.push({ name: c.name, input: c.input || {} });
-      let content;
-      let isError = false;
-      try {
-        if (!tool) throw new Error('You do not have access to that.');
-        const { path, query } = tool.request(c.input || {});
-        content = JSON.stringify(await call(path, query));
-        if (content.length > MAX_RESULT) content = `${content.slice(0, MAX_RESULT)} …(cut: too long; search more narrowly)`;
-      } catch (e) {
-        isError = true;
-        content = e.message || 'Lookup failed.';
-      }
-      results.push({ type: 'tool_result', tool_use_id: c.id, content, ...(isError ? { is_error: true } : {}) });
-    }
-    convo.push({ role: 'user', content: results });
-  }
-  return { reply: 'That needed too many lookups. Please ask a narrower question.', tools: used };
 }
 
-module.exports = { ask, toolsFor, TOOLS, setAnthropicFetch, HawaError, systemPrompt };
+module.exports = { ask, toolsFor, TOOLS, setAnthropicFetch: assistant.setAnthropicFetch, HawaError, systemPrompt };

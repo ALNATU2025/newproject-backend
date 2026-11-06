@@ -86,6 +86,7 @@ function createApp() {
         webhook: env.kuda.webhookToken ? 'set' : 'MISSING — set KUDA_WEBHOOK_TOKEN',
       },
       hawa: env.anthropic.apiKey ? `on (${env.anthropic.model})` : 'off — set ANTHROPIC_API_KEY',
+      aminata: env.anthropic.apiKey ? 'on (customer support chat)' : 'off — set ANTHROPIC_API_KEY',
       vtpass: {
         mode: vt.environment,
         keys: vt.apiKey && vt.publicKey && vt.secretKey ? 'set' : 'MISSING',
@@ -115,6 +116,7 @@ function createApp() {
   app.use('/api/referrals', require('./routes/referrals'));
   app.use('/api/notifications', require('./routes/notifications'));
   app.use('/api/disputes', require('./routes/disputes'));
+  app.use('/api/support', require('./routes/support'));
   app.use('/api/kyc', require('./routes/kyc'));
   app.use('/api/tiers', require('./routes/tiers'));
   app.use('/api/payouts', require('./routes/payouts'));
