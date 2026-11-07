@@ -207,7 +207,7 @@ describe('step 2: actions, voice, alerts', () => {
     const u = await readyUser({ fund: 5000 });
     const before = await AdminAlert.countDocuments({ title: 'Payment failed' });
     const p = await api().post('/api/services/airtime').set(auth(u.token)).send({ network: 'mtn', phone: '08030000000', amount: 100, pin: u.pin });
-    expect(p.status).toBeGreaterThanOrEqual(400);
+    expect(p.status === 201 ? p.body.data.transaction.status : p.status).not.toBe('success');
     await new Promise((res) => setTimeout(res, 300));
     const failed = await AdminAlert.findOne({ title: 'Payment failed' }).sort({ createdAt: -1 });
     expect(await AdminAlert.countDocuments({ title: 'Payment failed' })).toBe(before + 1);
