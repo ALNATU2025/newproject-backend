@@ -11,6 +11,29 @@ const { fmt } = require('./limits');
  * refunded and takes back any commission paid on it. `amount` (kobo)
  * defaults to the full amount. Safe against double refunds.
  */
+/** Tells admins (push + Hawa) that a bill payment or bank transfer failed. */
+async function alertFailedPayment(txn, refunded, reason) {
+  // eslint-disable-next-line global-require
+  const { BILL_SERVICES } = require('../models/constants');
+  if (![...BILL_SERVICES, 'payout'].includes(txn.type)) return;
+  // eslint-disable-next-line global-require
+  const settings = await require('./settings').getSettings();
+  if (settings.adminNotify && settings.adminNotify.failedPayments === false) return;
+  const u = await User.findById(txn.user).select('fullName country');
+  // eslint-disable-next-line global-require
+  const { formatMoney } = require('../utils/money');
+  const money = formatMoney(txn.amount, txn.currency || (u && u.country === 'SL' ? 'SLE' : 'NGN'));
+  // eslint-disable-next-line global-require
+  await require('./alerts').raiseAlert({
+    type: 'provider',
+    severity: 'warning',
+    title: 'Payment failed',
+    body: `${u ? u.fullName : 'A customer'}'s ${txn.description || txn.type} (${money}, ${txn.reference}) failed${reason ? `: ${reason}` : ''}. ${refunded ? 'Refunded to their wallet.' : ''}`.trim(),
+    user: txn.user,
+    transaction: txn._id,
+  });
+}
+
 async function refundTransaction(txn, { amount, reason, actor = null, status = 'refunded' } = {}) {
   if (txn.direction !== 'debit') throw badRequest('Only payments can be refunded.');
   const refundAmount = amount === undefined ? txn.amount : amount;
@@ -38,6 +61,8 @@ async function refundTransaction(txn, { amount, reason, actor = null, status = '
       },
     ]);
   }
+
+  if (status === 'failed') alertFailedPayment(txn, refundAmount, reason).catch(() => {});
 
   const refund = await Transaction.create({
     user: txn.user,

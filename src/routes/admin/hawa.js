@@ -36,14 +36,15 @@ router.post(
   validate({
     body: z.object({
       messages: z.array(message).min(1).max(30).refine((m) => m[m.length - 1].role === 'user', 'The last message must be the question.'),
+      voice: z.boolean().optional(), // reply will be spoken: keep it short
     }),
   }),
   asyncHandler(async (req, res) => {
     const { messages } = req.body;
     const question = messages[messages.length - 1].content;
     try {
-      const out = await hawa.ask({ messages, admin: { fullName: req.user.fullName, role: req.user.role }, call: assistant.callAs(req, '/api/admin/') });
-      await audit(req.user._id, 'hawa.ask', { details: { question: question.slice(0, 300), tools: out.tools.map((t) => t.name) } });
+      const out = await hawa.ask({ messages, voice: Boolean(req.body.voice), admin: { fullName: req.user.fullName, role: req.user.role }, call: assistant.callAs(req, '/api/admin/') });
+      await audit(req.user._id, 'hawa.ask', { details: { question: question.slice(0, 300), voice: Boolean(req.body.voice), tools: out.tools.map((t) => t.name) } });
       ok(res, out);
     } catch (e) {
       if (e instanceof hawa.HawaError) {

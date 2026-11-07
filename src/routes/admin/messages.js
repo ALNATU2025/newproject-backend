@@ -11,6 +11,29 @@ const serialize = require('../../serializers');
 
 const router = express.Router();
 
+/** Emails a broadcast one by one, gently (email providers limit the rate). */
+async function emailEveryone(people, title, message) {
+  // eslint-disable-next-line global-require
+  const { sendMail } = require('../../services/mail');
+  const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  for (const p of people) {
+    const first = String(p.fullName || '').split(/\s+/)[0] || 'there';
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await sendMail({
+        to: p.email,
+        subject: title,
+        text: `Hi ${first},\n\n${message}\n\nThe Dalabapay team`,
+        html: `<p>Hi ${esc(first)},</p><p>${esc(message).replace(/\n/g, '<br>')}</p><p>The Dalabapay team</p>`,
+      });
+    } catch (e) {
+      console.warn('[broadcast email]', p.email, e.message);
+    }
+    // eslint-disable-next-line no-await-in-loop
+    if (process.env.NODE_ENV !== 'test') await new Promise((r) => setTimeout(r, 600));
+  }
+}
+
 const KIND_FOR_TYPE = {
   announcement: 'general',
   promotional: 'promo',
@@ -61,10 +84,12 @@ router.post(
       type: z.enum(Object.keys(KIND_FOR_TYPE)).default('announcement'),
       audience: z.enum(['all', 'selected']),
       userIds: z.array(fields.objectId).max(5000).optional(),
+      // Also email everyone with an email address (sent in the background).
+      email: z.boolean().optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const { title, message, type, audience, userIds } = req.body;
+    const { title, message, type, audience, userIds, email } = req.body;
     let ids;
     if (audience === 'all') {
       ids = await User.find({ isActive: true }).distinct('_id');
@@ -90,8 +115,14 @@ router.post(
     }
     // eslint-disable-next-line global-require
     require('../../services/push').pushToUsers(ids, { title, body: message, data: { kind, broadcastId: String(broadcast._id) } }).catch(() => {});
-    await audit(req.user._id, 'notification.broadcast', { details: { title, audience, recipients: ids.length } });
-    ok(res, { sent: ids.length, broadcastId: String(broadcast._id) }, 201);
+    let emailing = 0;
+    if (email) {
+      const people = await User.find({ _id: { $in: ids }, email: { $nin: [null, ''] } }).select('email fullName').lean();
+      emailing = people.length;
+      emailEveryone(people, title, message).catch((e) => console.error('[broadcast email]', e.message));
+    }
+    await audit(req.user._id, 'notification.broadcast', { details: { title, audience, recipients: ids.length, emailing } });
+    ok(res, { sent: ids.length, emailing, broadcastId: String(broadcast._id) }, 201);
   }),
 );
 

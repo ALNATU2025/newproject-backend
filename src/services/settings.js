@@ -131,6 +131,7 @@ const DEFAULTS = {
   // What admins hear about by push and webhook (alerts always go out).
   adminNotify: {
     transactions: true, // every credit and debit
+    failedPayments: true, // bill payments and bank transfers that fail
   },
 
   // Sierra Leone international airtime: VTpass charges your Naira wallet,

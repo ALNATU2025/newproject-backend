@@ -53,6 +53,41 @@ async function sweepOnce({ now = Date.now(), limit = 25 } = {}) {
   return results;
 }
 
+// ── VTpass (bill provider) wallet watcher ─────────────────────
+// Checked every 30 minutes; while it is below Admin → Settings → low
+// balance threshold, admins are alerted (push + Hawa) at most every 6 hours.
+const BALANCE_EVERY_MS = 30 * 60 * 1000;
+const BALANCE_REPEAT_MS = 6 * 60 * 60 * 1000;
+const balanceWatch = { checkedAt: 0, alertedAt: 0 };
+
+async function checkProviderBalance({ now = Date.now(), force = false } = {}) {
+  if (!force && now - balanceWatch.checkedAt < BALANCE_EVERY_MS) return null;
+  balanceWatch.checkedAt = now;
+  // eslint-disable-next-line global-require
+  const s = await require('./settings').getSettings();
+  if (!s.lowBalanceAlerts) return null;
+  // eslint-disable-next-line global-require
+  const bp = require('../providers/bill');
+  const bal = await bp.balance();
+  if (bal === null || bal === undefined) return null;
+  if (bal >= s.lowBalanceThreshold) {
+    balanceWatch.alertedAt = 0; // topped up: alert again next time it drops
+    return { balance: bal, low: false };
+  }
+  if (now - balanceWatch.alertedAt >= BALANCE_REPEAT_MS) {
+    balanceWatch.alertedAt = now;
+    const naira = (k) => `₦${Math.round(k / 100).toLocaleString('en-NG')}`;
+    await raiseAlert({
+      type: 'provider',
+      severity: 'critical',
+      title: 'VTpass wallet is low',
+      body: `The VTpass wallet has ${naira(bal)}, below your ${naira(s.lowBalanceThreshold)} alert level. Top it up on vtpass.com so payments don't fail.`,
+      data: { balance: bal / 100 },
+    });
+  }
+  return { balance: bal, low: true };
+}
+
 function startPendingSweeper() {
   let running = false;
   const timer = setInterval(async () => {
@@ -60,6 +95,7 @@ function startPendingSweeper() {
     running = true;
     try {
       await sweepOnce();
+      await checkProviderBalance().catch((e) => console.warn('[balance watch]', e.message));
     } catch (e) {
       console.error('Pending sweeper:', e.message);
     } finally {
@@ -70,4 +106,4 @@ function startPendingSweeper() {
   return timer;
 }
 
-module.exports = { sweepOnce, startPendingSweeper };
+module.exports = { sweepOnce, startPendingSweeper, checkProviderBalance, balanceWatch };

@@ -35,8 +35,8 @@ beforeEach(() => {
   requests.length = 0;
 });
 
-const chat = (token, q, history = []) =>
-  api().post('/api/admin/hawa/chat').set(auth(token)).send({ messages: [...history, { role: 'user', content: q }] });
+const chat = (token, q, history = [], voice = false) =>
+  api().post('/api/admin/hawa/chat').set(auth(token)).send({ messages: [...history, { role: 'user', content: q }], ...(voice ? { voice: true } : {}) });
 
 test('explains a failed payment by looking it up (search, then open)', async () => {
   const admin = await readyUser({ role: 'super', fullName: 'Alusine Barrie' });
@@ -138,4 +138,90 @@ test('customers can\'t use Hawa; conversation is passed on; errors are clear', a
   expect(off.status).toBe(503);
   expect(off.body.code).toBe('HAWA_NOT_CONFIGURED');
   env.anthropic.apiKey = 'sk-ant-test';
+});
+
+describe('step 2: actions, voice, alerts', () => {
+  const { AdminAlert, User } = require('../src/models');
+  const { updateSettings } = require('../src/services/settings');
+  const sweeper = require('../src/services/pendingSweeper');
+
+  test('prepares buttons (built by the server); nothing changes until the admin confirms', async () => {
+    const admin = await readyUser({ role: 'super' });
+    const newbie = await readyUser({ fullName: 'Foday Sesay', pending: true });
+    const topUp = await Transaction.create({
+      user: newbie.user.id, reference: 'BT-0001', type: 'wallet_funding', direction: 'credit', amount: 2500000, status: 'pending',
+      metadata: { method: 'manual_bank', stage: 'sent' },
+    });
+    script = (body, n = requests.length) => {
+      if (n === 1) return reply(200, { stop_reason: 'tool_use', content: [
+        { type: 'tool_use', id: 'a', name: 'offer_bank_topup_decision', input: { funding_id: String(topUp._id), decision: 'confirm' } },
+        { type: 'tool_use', id: 'b', name: 'offer_account_decision', input: { user_id: newbie.user.id, decision: 'approve' } },
+        { type: 'tool_use', id: 'c', name: 'offer_send_notification', input: { title: 'Maintenance tonight', message: 'Dalabapay will be down from 2am to 3am.', audience: 'all', email: true } },
+      ] });
+      return reply(200, text('Tap Confirm to do it.'));
+    };
+    const r = await chat(admin.token, 'Confirm Foday\'s top-up, approve him and tell everyone about maintenance', [], true);
+    expect(r.status).toBe(200);
+    const [t, a, b] = r.body.data.actions;
+    expect(t).toEqual(expect.objectContaining({ type: 'admin_request', method: 'POST', path: `/api/admin/funding/bank/${topUp._id}/confirm`, label: 'Confirm ₦25,000.00 top-up' }));
+    expect(t.summary).toMatch(/Foday Sesay/);
+    expect(a).toEqual(expect.objectContaining({ method: 'POST', path: `/api/admin/users/${newbie.user.id}/approve`, label: 'Approve Foday Sesay' }));
+    expect(b).toEqual(expect.objectContaining({ method: 'POST', path: '/api/admin/broadcasts' }));
+    expect(b.body).toEqual(expect.objectContaining({ title: 'Maintenance tonight', audience: 'all', email: true }));
+    expect(b.label).toMatch(/^Send to \d+ users$/);
+    // Nothing happened yet.
+    expect((await Transaction.findById(topUp._id)).status).toBe('pending');
+    expect((await User.findById(newbie.user.id)).isApproved).toBe(false);
+    // Voice mode: short spoken replies.
+    expect(requests[0].body.system).toMatch(/VOICE MODE/);
+    expect(requests[0].body.max_tokens).toBe(600);
+
+    // The admin taps Confirm: the app calls the normal endpoints.
+    const call = (x) => api()[x.method.toLowerCase()](x.path).set(auth(admin.token)).send(x.body);
+    expect((await call(a)).status).toBe(200);
+    expect((await User.findById(newbie.user.id)).isApproved).toBe(true);
+    const sent = await call(b);
+    expect(sent.status).toBe(201);
+    expect(sent.body.data.emailing).toBeGreaterThan(0);
+  });
+
+  test('action buttons follow the role; bad requests are refused', async () => {
+    const support = await readyUser({ role: 'support' });
+    const names = hawa.toolsFor('support').map((t) => t.name);
+    expect(names).not.toContain('offer_bank_topup_decision');
+    expect(names).not.toContain('offer_send_notification');
+    expect(hawa.toolsFor('finance').map((t) => t.name)).not.toContain('offer_account_decision');
+    expect(hawa.toolsFor('super').map((t) => t.name)).toEqual(expect.arrayContaining(hawa.ACTIONS.map((t) => t.name)));
+    script = (body, n = requests.length) => {
+      if (n === 1) return reply(200, { stop_reason: 'tool_use', content: [
+        { type: 'tool_use', id: 'a', name: 'offer_send_notification', input: { title: 'x', message: 'y', audience: 'all' } },
+      ] });
+      return reply(200, text(String(lastResults(body)[0].is_error)));
+    };
+    const r = await chat(support.token, 'Send everyone a message');
+    expect(r.body.data.reply).toBe('true');
+    expect(r.body.data.actions).toEqual([]);
+  });
+
+  test('payment failed and VTpass low raise alerts (push + Hawa)', async () => {
+    const u = await readyUser({ fund: 5000 });
+    const before = await AdminAlert.countDocuments({ title: 'Payment failed' });
+    const p = await api().post('/api/services/airtime').set(auth(u.token)).send({ network: 'mtn', phone: '08030000000', amount: 100, pin: u.pin });
+    expect(p.status).toBeGreaterThanOrEqual(400);
+    await new Promise((res) => setTimeout(res, 300));
+    const failed = await AdminAlert.findOne({ title: 'Payment failed' }).sort({ createdAt: -1 });
+    expect(await AdminAlert.countDocuments({ title: 'Payment failed' })).toBe(before + 1);
+    expect(failed.body).toMatch(/Refunded to their wallet/);
+
+    await updateSettings({ lowBalanceAlerts: true, lowBalanceThreshold: 1e15 });
+    sweeper.balanceWatch.alertedAt = 0;
+    const w = await sweeper.checkProviderBalance({ force: true });
+    if (w) {
+      expect(w.low).toBe(true);
+      expect(await AdminAlert.countDocuments({ title: 'VTpass wallet is low' })).toBe(1);
+      await sweeper.checkProviderBalance({ force: true }); // not again within 6 hours
+      expect(await AdminAlert.countDocuments({ title: 'VTpass wallet is low' })).toBe(1);
+    }
+    await updateSettings({ lowBalanceThreshold: 50_000 * 100 });
+  });
 });
