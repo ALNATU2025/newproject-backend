@@ -67,7 +67,7 @@ async function checkProviderBalance({ now = Date.now(), force = false } = {}) {
   const s = await require('./settings').getSettings();
   if (!s.lowBalanceAlerts) return null;
   // eslint-disable-next-line global-require
-  const bp = require('../providers/bill');
+  const bp = require('../providers/bill').billProvider();
   const bal = await bp.balance();
   if (bal === null || bal === undefined) return null;
   if (bal >= s.lowBalanceThreshold) {
