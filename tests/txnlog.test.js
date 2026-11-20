@@ -68,3 +68,12 @@ test('format and mask', () => {
   );
   expect(line).toBe('[TXN] FAILED  | debit Le 5,000.00 | Electricity EDSA 4512***6901 | Ibrahim Conteh (0761***456, SL) | ref DP-1 | sl | reason: Invalid meter number | refunded');
 });
+
+test('VTpass code and what it means', () => {
+  const line = format(
+    { user: 'x', direction: 'debit', amount: 1900000, currency: 'NGN', description: 'DStv Current package', recipient: '7039216378', reference: 'R1', status: 'failed', refunded: true, provider: 'vtpass', metadata: { failureReason: 'TRANSACTION FAILED', providerRaw: { code: '016', transactionId: '17321' } } },
+    { fullName: 'A J', phone: '09163207050', country: 'NG' },
+  );
+  expect(line).toMatch(/reason: TRANSACTION FAILED \| vtpass code 016 \(declined by the biller/);
+  expect(line).toMatch(/vtpass id 17321/);
+});

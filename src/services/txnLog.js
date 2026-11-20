@@ -28,6 +28,21 @@ function mask(v) {
   return `${s.slice(0, 4)}***${s.slice(-keepEnd)}`;
 }
 
+// What VTpass's codes mean (shown after the reason in the log).
+const VTPASS_HINTS = {
+  '016': 'declined by the biller (e.g. DStv/GOtv) — try again later, or check the smartcard / meter',
+  '018': 'VTpass wallet is low — top it up on vtpass.com',
+  '011': 'VTpass rejected the details sent (number, plan or amount)',
+  '012': 'that product / package does not exist at VTpass any more',
+  '013': 'amount is below the minimum',
+  '017': 'amount is above the maximum',
+  '019': 'VTpass thinks it is a duplicate payment',
+  '030': 'the biller is not reachable right now — try again later',
+  '034': 'the service is suspended at VTpass',
+  '035': 'the service is inactive at VTpass',
+  '083': 'VTpass system error — try again later',
+};
+
 const clean = (v, max = 160) => String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim().slice(0, max);
 
 /** One readable line for a transaction (exported for tests). */
@@ -50,6 +65,13 @@ function format(t, user, { status } = {}) {
   if (st === 'failed' || st === 'reversed') {
     const why = meta.failureReason || meta.reason || meta.providerMessage || meta.error;
     parts.push(`reason: ${clean(why) || 'not recorded'}`);
+    const raw = meta.providerRaw || {};
+    if (raw.code && raw.code !== '000') {
+      parts.push(`${t.provider || 'provider'} code ${raw.code}${VTPASS_HINTS[raw.code] && t.provider === 'vtpass' ? ` (${VTPASS_HINTS[raw.code]})` : ''}`);
+    } else if (raw.status) {
+      parts.push(`${t.provider || 'provider'} status ${clean(raw.status, 40)}`);
+    }
+    if (raw.transactionId) parts.push(`${t.provider || 'provider'} id ${clean(raw.transactionId, 40)}`);
     if (t.refunded) parts.push('refunded');
   }
   if (st === 'refunded' && meta.refundReason) parts.push(`reason: ${clean(meta.refundReason)}`);

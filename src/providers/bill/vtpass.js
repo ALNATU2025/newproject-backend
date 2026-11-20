@@ -449,7 +449,9 @@ function createVtpass({
     }
     // Errors here (timeout, network) propagate: the payment stays pending.
     const json = await call('POST', 'pay', body);
-    return interpret(json, { requestId, expectedKobo: amount });
+    const r = await interpret(json, { requestId, expectedKobo: amount });
+    if (r.status !== 'success') logDecline(provider, json, body, action === 'renew' ? 'renew' : 'plan');
+    return r;
   }
 
   async function requery(requestId) {
