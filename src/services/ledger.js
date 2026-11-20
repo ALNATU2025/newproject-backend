@@ -41,9 +41,21 @@ async function refundTransaction(txn, { amount, reason, actor = null, status = '
     throw badRequest('Refund amount must be between ₦0 and the payment amount.');
   }
   // Claim the refund atomically so two admins can't refund twice.
+  // A failed payment keeps its reason (logs, Hawa, Aminata, admin).
+  const why = reason ? String(reason).slice(0, 300) : null;
   const claimed = await Transaction.findOneAndUpdate(
     { _id: txn._id, refunded: false },
-    { $set: { refunded: true, status } },
+    [
+      {
+        $set: {
+          refunded: true,
+          status,
+          metadata: {
+            $mergeObjects: [{ $ifNull: ['$metadata', {}] }, why ? (status === 'failed' ? { failureReason: why } : { refundReason: why }) : {}],
+          },
+        },
+      },
+    ],
     { new: true },
   );
   if (!claimed) throw conflict('This payment has already been refunded.', 'ALREADY_REFUNDED');

@@ -55,6 +55,28 @@ transactionSchema.pre('validate', async function setCurrency() {
 // Admins hear about every new credit and debit (push + webhook).
 transactionSchema.pre('save', function rememberNew() {
   this.$locals.wasNew = this.isNew;
+  this.$locals.statusChanged = !this.isNew && this.isModified('status');
+});
+
+// Server logs: one line per new transaction and per status change
+// (who, what, how much; failed ones say why). See services/txnLog.js.
+const logTxn = (doc, opts) =>
+  // eslint-disable-next-line global-require
+  setImmediate(() => require('../services/txnLog').logTransaction(doc, opts).catch(() => {}));
+transactionSchema.post('save', function logSaved(doc) {
+  if (doc.$locals.wasNew || doc.$locals.statusChanged) logTxn(doc);
+});
+transactionSchema.post('findOneAndUpdate', function logStatusChange(doc) {
+  if (!doc) return;
+  const upd = this.getUpdate() || {};
+  const stages = Array.isArray(upd) ? upd : [upd];
+  let status;
+  for (const s of stages) {
+    const set = (s && s.$set) || {};
+    if (typeof set.status === 'string') status = set.status;
+    else if (typeof (s && s.status) === 'string') status = s.status;
+  }
+  if (status) logTxn(doc, { status });
 });
 transactionSchema.post('save', function tellAdmins(doc) {
   if (!doc.$locals.wasNew) return;
