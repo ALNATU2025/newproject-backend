@@ -23,6 +23,7 @@ router.use('/disputes', require('./disputes'));
 router.use('/payments', require('./payments'));
 router.use('/roles', require('./roles'));
 router.use('/hawa', require('./hawa'));
+router.use('/vtpass', require('./vtpass'));
 router.use('/', require('./messages'));
 router.use('/', require('./settings'));
 

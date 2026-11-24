@@ -165,6 +165,10 @@ const DEFAULTS = {
 
   lowBalanceAlerts: true,
   lowBalanceThreshold: 50_000 * NAIRA,
+
+  // What VTpass pays Dalabapay per successful payment, in % (Admin → VTpass
+  // portal). Used when VTpass doesn't report the commission itself.
+  vtpassCommissionRate: 1.8,
 };
 
 let cache = null;
