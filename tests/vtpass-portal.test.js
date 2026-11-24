@@ -4,6 +4,7 @@ const { api, auth, useDatabase, readyUser } = require('./helpers');
 const { Transaction } = require('../src/models');
 
 useDatabase('vtpassportal');
+beforeEach(() => Transaction.deleteMany({}));
 
 async function seed(user) {
   const base = { user: user.user.id, provider: 'vtpass', direction: 'debit', type: 'cable' };
