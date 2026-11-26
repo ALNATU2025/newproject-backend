@@ -100,7 +100,7 @@ async function settle(txn, code) {
       userId: txn.user,
       amount,
       method: (txn.metadata && txn.metadata.methodName) || 'Mobile money',
-      providerReference: `MONIME-${code.id || txn.providerReference}`,
+      providerReference: (txn.metadata && txn.metadata.paymentCodeId) || code.id || txn.providerReference,
       pendingTxn: txn,
       chargeFee: true,
       feePercent: (s.monime && s.monime.depositFeePercent) || 0,
@@ -132,7 +132,7 @@ async function check(user, id) {
   if (!txn) throw badRequest('Top-up not found.', 'NOT_FOUND');
   if (txn.status === 'pending' && txn.providerReference) {
     try {
-      await settle(txn, await monime.getPaymentCode(txn.providerReference));
+      await settle(txn, await monime.getPaymentCode((txn.metadata && txn.metadata.paymentCodeId) || txn.providerReference));
     } catch (e) {
       if (!env.isTest) console.warn('[monime] check failed', txn.reference, e.message);
     }
@@ -195,7 +195,7 @@ async function onEvent(body) {
       $or: [{ providerReference: objectId }, { reference: data.reference || data.metadata?.reference || '__none__' }],
     });
     if (!txn) return { matched: false };
-    const code = await monime.getPaymentCode(txn.providerReference || objectId);
+    const code = await monime.getPaymentCode((txn.metadata && txn.metadata.paymentCodeId) || objectId);
     return { matched: true, reference: txn.reference, ...(await settle(txn, code)) };
   }
   if (name.startsWith('payout.')) {
