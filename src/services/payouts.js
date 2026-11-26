@@ -235,7 +235,8 @@ function debitWalletFor(destCurrency) {
 const viaKuda = (country, accountType = 'bank') => country === 'NG' && accountType === 'bank' && kuda.configured();
 
 /** Sierra Leone mobile money and banks go through Monime once MONIME_* is set. */
-const viaMonime = (country) => country === 'SL' && monime.configured();
+// Never in test mode: a simulated payout would debit a real wallet.
+const viaMonime = (country) => country === 'SL' && monime.configured() && !monime.testMode();
 
 /** Kuda's NIP fee for a transfer of [naira] (Kuda Business API pricing). */
 function kudaFee(naira) {

@@ -17,11 +17,15 @@ const env = require('../config/env');
 
 const METHOD = 'monime';
 
-async function options() {
+// With a test token payments are simulated, but credits would be real
+// balance: only staff accounts may use it then (customers never see it).
+const allowedFor = (user) => !monime.testMode() || (user && user.role && user.role !== 'user');
+
+async function options(user) {
   const s = await getSettings();
   const f = s.slFunding || {};
   const m = s.monime || {};
-  if (!monime.configured()) return { available: false, providers: [] };
+  if (!monime.configured() || !allowedFor(user)) return { available: false, providers: [] };
   const list = (await monime.momos()).filter((x) => x.canPay !== false);
   return {
     available: list.length > 0,
@@ -29,11 +33,13 @@ async function options() {
     minAmount: (f.minAmount || 0) / 100,
     maxAmount: (f.maxAmount || 0) / 100,
     feePercent: m.depositFeePercent || 0,
+    testMode: monime.testMode(),
   };
 }
 
 async function start(user, { amount, providerId, phone }) {
   if (user.country !== 'SL') throw forbidden('This is for Sierra Leone accounts.', 'WRONG_COUNTRY');
+  if (!allowedFor(user)) throw forbidden('Instant top-ups are not available yet.', 'NOT_AVAILABLE');
   const s = await getSettings();
   assertCanTransact(user, s);
   const f = s.slFunding || {};

@@ -98,6 +98,7 @@ function createApp() {
       monime: {
         keys: env.monime.accessToken && env.monime.spaceId ? 'set' : 'MISSING — set MONIME_ACCESS_TOKEN, MONIME_SPACE_ID',
         webhook: env.monime.webhookSecret ? 'set' : 'MISSING — set MONIME_WEBHOOK_SECRET',
+        mode: String(env.monime.accessToken || '').startsWith('mon_test_') ? 'TEST (simulated; admins only, transfers not via Monime)' : 'live',
         instantAddMoney: env.monime.accessToken && env.monime.spaceId ? 'on (Sierra Leone)' : 'off',
         amountUnit: env.monime.amountUnit,
       },

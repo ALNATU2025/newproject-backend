@@ -231,7 +231,7 @@ const monimeFunding = require('../services/monimeFunding');
 
 router.get('/fund/monime', asyncHandler(async (req, res) => {
   if (!isSl(req)) throw forbidden('This is for Sierra Leone accounts.', 'WRONG_COUNTRY');
-  ok(res, await monimeFunding.options());
+  ok(res, await monimeFunding.options(req.user));
 }));
 
 router.post(

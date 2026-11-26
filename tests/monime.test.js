@@ -209,3 +209,22 @@ test('signature check', () => {
   expect(monime.msisdn('076 123 456')).toBe('+23276123456');
   expect(monime.msisdn('23277000111')).toBe('+23277000111');
 });
+
+test('test token (mon_test_): only staff can top up; transfers do not use Monime', async () => {
+  const saved = env.monime.accessToken;
+  env.monime.accessToken = 'mon_test_abc';
+  clearPayoutCache();
+  try {
+    const customer = await readyUser({ country: 'SL' });
+    expect((await api().get('/api/wallet/fund/monime').set(auth(customer.token))).body.data.available).toBe(false);
+    expect((await api().post('/api/wallet/fund/monime').set(auth(customer.token)).send({ amount: 50, providerId: 'm17', phone: '076123456' })).status).toBe(403);
+    const admin = await readyUser({ country: 'SL', role: 'admin' });
+    const o = (await api().get('/api/wallet/fund/monime').set(auth(admin.token))).body.data;
+    expect(o).toEqual(expect.objectContaining({ available: true, testMode: true }));
+    expect((await api().post('/api/wallet/fund/monime').set(auth(admin.token)).send({ amount: 50, providerId: 'm17', phone: '076123456' })).status).toBe(201);
+    expect(monime.testMode()).toBe(true);
+  } finally {
+    env.monime.accessToken = saved;
+    clearPayoutCache();
+  }
+});
