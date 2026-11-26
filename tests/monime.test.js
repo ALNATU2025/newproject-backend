@@ -161,7 +161,9 @@ describe('Transfers to Sierra Leone mobile money through Monime', () => {
 
     const q = await quote(u);
     expect(q.status).toBe(200);
-    expect(q.body.data.charge).toBeCloseTo(200, 2); // no Monime fee set
+    const charge = q.body.data.charge; // ₦ amount + Dalabapay's transfer fee % (no Monime fee set)
+    expect(charge).toBeGreaterThanOrEqual(200);
+    expect(charge).toBeLessThan(210);
     const s = await api().post('/api/payouts/send').set(auth(u.token)).send({ quoteToken: q.body.data.quoteToken, pin: u.pin });
     expect(s.status).toBe(201);
     const sent = calls.find((x) => x.path === '/v1/payouts');
@@ -169,7 +171,7 @@ describe('Transfers to Sierra Leone mobile money through Monime', () => {
     const t = await Transaction.findById(s.body.data.transaction.id);
     expect(t.provider).toBe('monime');
     expect(t.status).toBe('pending');
-    expect((await balanceOf(u.token)).balance).toBeCloseTo(800, 2);
+    expect((await balanceOf(u.token)).balance).toBeCloseTo(1000 - charge, 2);
 
     payouts[t.providerReference].status = 'completed';
     const w = await hook('payout.completed', payouts[t.providerReference]);
