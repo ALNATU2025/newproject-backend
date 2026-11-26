@@ -78,7 +78,7 @@ test('networks and data bundles in Leones', async () => {
 test('airtime: Leones sent as local amount, or converted to USD when the operator needs it', async () => {
   const u = await slUser();
   const r = await api().post('/api/services/sl/airtime').set(auth(u.token)).send({ network: 'africell', phone: '077123456', amount: 50, pin: u.pin });
-  expect(r.status).toBe(201);
+  expect([r.status, r.body.code, r.body.message]).toEqual([201, undefined, undefined]);
   expect(r.body.data.transaction.status).toBe('success');
   const sent = calls.find((c) => c.url.endsWith('/topups'));
   expect(sent.body).toEqual(expect.objectContaining({ operatorId: 701, amount: 50, useLocalAmount: true, recipientPhone: { countryCode: 'SL', number: '077123456' } }));
@@ -93,7 +93,7 @@ test('airtime: Leones sent as local amount, or converted to USD when the operato
 test('data bundle; declined → refunded with the reason; no answer → pending', async () => {
   const u = await slUser();
   const d = await api().post('/api/services/sl/data').set(auth(u.token)).send({ network: 'orange', phone: '076123456', planCode: '703:2.00', pin: u.pin });
-  expect(d.status).toBe(201);
+  expect([d.status, d.body.code, d.body.message]).toEqual([201, undefined, undefined]);
   expect(calls.find((c) => c.url.endsWith('/topups')).body).toEqual(expect.objectContaining({ operatorId: 703, amount: 2, useLocalAmount: false }));
   expect((await balanceOf(u.token)).balance).toBeCloseTo(455, 2);
 
