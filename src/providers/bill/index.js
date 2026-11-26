@@ -2,7 +2,8 @@
 //
 //   BILL_PROVIDER    none | simulator | vtpass   — default for every service
 //   VTPASS_SERVICES  e.g. "cable"                 — these go to VTpass instead
-//   SL_PROVIDER      none | simulator | <name>    — Sierra Leone services
+//   SL_PROVIDER      none | simulator | reloadly  — Sierra Leone services
+//                    (reloadly: airtime + data; EDSA / TV not yet)
 //                    (sl_airtime, sl_data, sl_electricity, sl_cable)
 //
 // So BILL_PROVIDER=simulator + VTPASS_SERVICES=cable sends DStv/GOtv/
@@ -18,6 +19,7 @@ const { BILL_SERVICES, SL_SERVICES } = require('../../models/constants');
 const makers = {
   none: () => require('./none'),
   simulator: () => require('./simulator'),
+  reloadly: () => require('./reloadly'),
   vtpass: () => {
     const { createVtpass } = require('./vtpass');
     return createVtpass(env.vtpass);
