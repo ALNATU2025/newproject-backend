@@ -122,7 +122,7 @@ async function baseCountries({ fresh = false } = {}) {
       else if (c.canPayout && c.currencies[0]) byCode.set(c.code, { code: c.code, name: c.name || c.code, currency: c.currencies[0] });
     }
   } catch (e) {
-    if (e instanceof AppError && e.code === 'PROVIDER_NOT_CONFIGURED' && !kuda.configured()) throw e;
+    if (e instanceof AppError && e.code === 'PROVIDER_NOT_CONFIGURED' && !kuda.configured() && !monime.configured()) throw e;
   }
   // Only Kuda connected: Nigeria (banks) only.
   const list = [...byCode.values()].filter(
