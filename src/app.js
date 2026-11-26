@@ -95,6 +95,12 @@ function createApp() {
       },
       hawa: env.anthropic.apiKey ? `on (${env.anthropic.model})` : 'off — set ANTHROPIC_API_KEY',
       aminata: env.anthropic.apiKey ? 'on (customer support chat)' : 'off — set ANTHROPIC_API_KEY',
+      monime: {
+        keys: env.monime.accessToken && env.monime.spaceId ? 'set' : 'MISSING — set MONIME_ACCESS_TOKEN, MONIME_SPACE_ID',
+        webhook: env.monime.webhookSecret ? 'set' : 'MISSING — set MONIME_WEBHOOK_SECRET',
+        instantAddMoney: env.monime.accessToken && env.monime.spaceId ? 'on (Sierra Leone)' : 'off',
+        amountUnit: env.monime.amountUnit,
+      },
       vtpass: {
         mode: vt.environment,
         keys: vt.apiKey && vt.publicKey && vt.secretKey ? 'set' : 'MISSING',
