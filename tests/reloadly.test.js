@@ -64,9 +64,9 @@ const slUser = async (le = 500) => {
 
 test('networks and data bundles in Leones', async () => {
   const u = await slUser();
-  const nets = (await api().get('/api/sl/networks').set(auth(u.token))).body.data;
+  const nets = (await api().get('/api/services/sl/networks').set(auth(u.token))).body.data;
   expect(nets).toEqual([{ id: 'africell', name: 'Africell' }, { id: 'orange', name: 'Orange' }]);
-  const plans = (await api().get('/api/sl/data/plans?network=orange').set(auth(u.token))).body.data;
+  const plans = (await api().get('/api/services/sl/data/plans?network=orange').set(auth(u.token))).body.data;
   expect(plans).toEqual([
     expect.objectContaining({ code: '703:2.00', name: '1.5GB · 7 days', amount: 45 }),
     expect.objectContaining({ code: '703:5.00', name: '5GB · 30 days', amount: 112.5 }),
@@ -77,7 +77,7 @@ test('networks and data bundles in Leones', async () => {
 
 test('airtime: Leones sent as local amount, or converted to USD when the operator needs it', async () => {
   const u = await slUser();
-  const r = await api().post('/api/sl/airtime').set(auth(u.token)).send({ network: 'africell', phone: '077123456', amount: 50, pin: u.pin });
+  const r = await api().post('/api/services/sl/airtime').set(auth(u.token)).send({ network: 'africell', phone: '077123456', amount: 50, pin: u.pin });
   expect(r.status).toBe(201);
   expect(r.body.data.transaction.status).toBe('success');
   const sent = calls.find((c) => c.url.endsWith('/topups'));
@@ -86,19 +86,19 @@ test('airtime: Leones sent as local amount, or converted to USD when the operato
   expect((await balanceOf(u.token)).balance).toBeCloseTo(450, 2);
 
   calls.length = 0;
-  await api().post('/api/sl/airtime').set(auth(u.token)).send({ network: 'orange', phone: '076123456', amount: 45, pin: u.pin });
+  await api().post('/api/services/sl/airtime').set(auth(u.token)).send({ network: 'orange', phone: '076123456', amount: 45, pin: u.pin });
   expect(calls.find((c) => c.url.endsWith('/topups')).body).toEqual(expect.objectContaining({ operatorId: 702, amount: 2, useLocalAmount: false }));
 });
 
 test('data bundle; declined → refunded with the reason; no answer → pending', async () => {
   const u = await slUser();
-  const d = await api().post('/api/sl/data').set(auth(u.token)).send({ network: 'orange', phone: '076123456', planCode: '703:2.00', pin: u.pin });
+  const d = await api().post('/api/services/sl/data').set(auth(u.token)).send({ network: 'orange', phone: '076123456', planCode: '703:2.00', pin: u.pin });
   expect(d.status).toBe(201);
   expect(calls.find((c) => c.url.endsWith('/topups')).body).toEqual(expect.objectContaining({ operatorId: 703, amount: 2, useLocalAmount: false }));
   expect((await balanceOf(u.token)).balance).toBeCloseTo(455, 2);
 
   topupMode = 'decline';
-  const bad = await api().post('/api/sl/airtime').set(auth(u.token)).send({ network: 'africell', phone: '077000999', amount: 20, pin: u.pin });
+  const bad = await api().post('/api/services/sl/airtime').set(auth(u.token)).send({ network: 'africell', phone: '077000999', amount: 20, pin: u.pin });
   const t = await Transaction.findOne({ user: u.user.id, recipient: '077000999' });
   expect(t.status).toBe('failed');
   expect(t.metadata.failureReason).toMatch(/Invalid phone number/);
@@ -106,7 +106,7 @@ test('data bundle; declined → refunded with the reason; no answer → pending'
   expect(bad.status === 201 || bad.status >= 400).toBe(true);
 
   topupMode = 'timeout';
-  const slow = await api().post('/api/sl/airtime').set(auth(u.token)).send({ network: 'africell', phone: '077000888', amount: 10, pin: u.pin });
+  const slow = await api().post('/api/services/sl/airtime').set(auth(u.token)).send({ network: 'africell', phone: '077000888', amount: 10, pin: u.pin });
   const p = await Transaction.findOne({ user: u.user.id, recipient: '077000888' });
   expect(p.status).toBe('pending');
   expect(slow.status).toBeLessThan(500);
@@ -116,7 +116,7 @@ test('data bundle; declined → refunded with the reason; no answer → pending'
 
 test('EDSA and TV are not on Reloadly: clear message', async () => {
   const u = await slUser();
-  const r = await api().post('/api/sl/electricity/verify').set(auth(u.token)).send({ meterNumber: '04123456789' });
+  const r = await api().post('/api/services/sl/electricity/verify').set(auth(u.token)).send({ meterNumber: '04123456789' });
   expect(r.status).toBe(503);
   expect(r.body.code).toBe('PROVIDER_NOT_CONFIGURED');
   expect(await reloadly.balance()).toBe(12550);
