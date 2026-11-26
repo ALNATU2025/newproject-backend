@@ -141,12 +141,6 @@ const env = {
     version: clean(process.env.MONIME_VERSION) || 'caph.2025-08-23',
     amountUnit: clean(process.env.MONIME_AMOUNT_UNIT).toLowerCase() === 'major' ? 'major' : 'minor',
   },
-  // Reloadly (SL_PROVIDER=reloadly): Sierra Leone airtime and data bundles.
-  reloadly: {
-    clientId: clean(process.env.RELOADLY_CLIENT_ID),
-    clientSecret: clean(process.env.RELOADLY_CLIENT_SECRET),
-    env: clean(process.env.RELOADLY_ENV).toLowerCase() === 'sandbox' ? 'sandbox' : 'live',
-  },
   // Hawa, the admin AI assistant (Anthropic API).
   anthropic: {
     apiKey: clean(process.env.ANTHROPIC_API_KEY),
