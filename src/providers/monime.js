@@ -20,7 +20,7 @@ function setFetch(fn) {
 const cfg = () => env.monime;
 const configured = () => Boolean(cfg().accessToken && cfg().spaceId);
 /** Test tokens (mon_test_…) only simulate payments: no real money moves. */
-const testMode = () => String(cfg().accessToken || '').startsWith('mon_test_');
+const testMode = () => cfg().mode !== 'live' || String(cfg().accessToken || '').startsWith('mon_test_');
 
 /** Our amounts are in cents; Monime's per MONIME_AMOUNT_UNIT. */
 const toMonime = (cents) => (cfg().amountUnit === 'major' ? Math.round(cents) / 100 : Math.round(cents));

@@ -140,6 +140,9 @@ const env = {
     baseUrl: clean(process.env.MONIME_BASE_URL) || 'https://api.monime.io',
     version: clean(process.env.MONIME_VERSION) || 'caph.2025-08-23',
     amountUnit: clean(process.env.MONIME_AMOUNT_UNIT).toLowerCase() === 'major' ? 'major' : 'minor',
+    // Test unless MONIME_MODE=live: Monime test tokens can't be told apart
+    // from live ones, and simulated payments must never reach customers.
+    mode: clean(process.env.MONIME_MODE).toLowerCase() === 'live' ? 'live' : 'test',
   },
   // Hawa, the admin AI assistant (Anthropic API).
   anthropic: {

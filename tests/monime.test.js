@@ -64,12 +64,12 @@ const hook = (event, object) => {
 };
 
 beforeAll(() => {
-  Object.assign(env.monime, { accessToken: 'mon_live_token', spaceId: 'spc-test', webhookSecret: SECRET, baseUrl: 'https://api.monime.test', amountUnit: 'minor' });
+  Object.assign(env.monime, { accessToken: 'mon_live_token', spaceId: 'spc-test', webhookSecret: SECRET, baseUrl: 'https://api.monime.test', amountUnit: 'minor', mode: 'live' });
   monime.setFetch(fakeMonime);
   clearPayoutCache();
 });
 afterAll(() => {
-  Object.assign(env.monime, { accessToken: '', spaceId: '', webhookSecret: '' });
+  Object.assign(env.monime, { accessToken: '', spaceId: '', webhookSecret: '', mode: 'test' });
   monime.setFetch(null);
 });
 beforeEach(() => {
@@ -226,5 +226,16 @@ test('test token (mon_test_): only staff can top up; transfers do not use Monime
   } finally {
     env.monime.accessToken = saved;
     clearPayoutCache();
+  }
+});
+
+test('without MONIME_MODE=live it stays in test mode, whatever the token looks like', async () => {
+  env.monime.mode = 'test';
+  try {
+    expect(monime.testMode()).toBe(true);
+    const customer = await readyUser({ country: 'SL' });
+    expect((await api().get('/api/wallet/fund/monime').set(auth(customer.token))).body.data.available).toBe(false);
+  } finally {
+    env.monime.mode = 'live';
   }
 });
