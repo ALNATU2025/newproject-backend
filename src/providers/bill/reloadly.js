@@ -164,7 +164,10 @@ module.exports = {
     return plans;
   },
 
-  async purchase({ service, requestId, amount, recipient, providerParams = {} }) {
+  async purchase(args) {
+    const { service, requestId, amount, recipient } = args;
+    // Route parameters arrive spread (network, planCode) or as providerParams.
+    const providerParams = { ...args, ...(args.providerParams || {}) };
     let body;
     if (service === 'sl_airtime') {
       const op = await airtimeOperator(providerParams.network);
