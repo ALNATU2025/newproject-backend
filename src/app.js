@@ -40,7 +40,15 @@ function createApp() {
   app.use('/api/cards', express.json({ limit: '8mb' }));
   // Account level upgrades carry document photos.
   app.use('/api/tiers', express.json({ limit: '12mb' }));
-  app.use(express.json({ limit: '200kb' }));
+  app.use(
+    express.json({
+      limit: '200kb',
+      // Webhooks are signed over the exact bytes received (Monime).
+      verify: (req, res, buf) => {
+        if (req.originalUrl.startsWith('/api/webhooks/')) req.rawBody = Buffer.from(buf);
+      },
+    }),
+  );
   // Request log without secret tokens in the URL (webhook / action links).
   // eslint-disable-next-line global-require
   const security = require('./middleware/security');

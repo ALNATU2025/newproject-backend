@@ -131,6 +131,16 @@ const env = {
     env: clean(process.env.KUDA_ENV).toLowerCase() === 'uat' ? 'uat' : 'live',
     webhookToken: clean(process.env.KUDA_WEBHOOK_TOKEN),
   },
+  // Monime (Sierra Leone): Orange Money / Afrimoney Add Money and transfers
+  // to Sierra Leone mobile money and banks (used once these are set).
+  monime: {
+    accessToken: clean(process.env.MONIME_ACCESS_TOKEN),
+    spaceId: clean(process.env.MONIME_SPACE_ID),
+    webhookSecret: clean(process.env.MONIME_WEBHOOK_SECRET),
+    baseUrl: clean(process.env.MONIME_BASE_URL) || 'https://api.monime.io',
+    version: clean(process.env.MONIME_VERSION) || 'caph.2025-08-23',
+    amountUnit: clean(process.env.MONIME_AMOUNT_UNIT).toLowerCase() === 'major' ? 'major' : 'minor',
+  },
   // Hawa, the admin AI assistant (Anthropic API).
   anthropic: {
     apiKey: clean(process.env.ANTHROPIC_API_KEY),

@@ -226,6 +226,32 @@ router.get(
   }),
 );
 
+// ── Sierra Leone instant Add Money (Monime: Orange Money / Afrimoney) ──
+const monimeFunding = require('../services/monimeFunding');
+
+router.get('/fund/monime', asyncHandler(async (req, res) => {
+  if (!isSl(req)) throw forbidden('This is for Sierra Leone accounts.', 'WRONG_COUNTRY');
+  ok(res, await monimeFunding.options());
+}));
+
+router.post(
+  '/fund/monime',
+  validate({ body: z.object({ amount: fields.amount, providerId: z.string().trim().min(1).max(20), phone: z.string().trim().max(20).optional() }) }),
+  asyncHandler(async (req, res) => {
+    const r = await monimeFunding.start(req.user, req.body);
+    ok(res, { transaction: serialize.transaction(r.transaction), ussdCode: r.ussdCode, expireTime: r.expireTime, provider: r.provider }, 201);
+  }),
+);
+
+router.get('/fund/monime/:id', validate({ params: z.object({ id: fields.objectId }) }), asyncHandler(async (req, res) => {
+  const t = await monimeFunding.check(req.user, req.params.id);
+  ok(res, { transaction: serialize.transaction(t), ussdCode: (t.metadata && t.metadata.ussdCode) || null });
+}));
+
+router.post('/fund/monime/:id/cancel', validate({ params: z.object({ id: fields.objectId }) }), asyncHandler(async (req, res) => {
+  ok(res, { transaction: serialize.transaction(await monimeFunding.cancel(req.user, req.params.id)) });
+}));
+
 /**
  * "I've paid": records a pending top-up for an admin to confirm (Admin →
  * Status Update). No money moves until an admin approves it.

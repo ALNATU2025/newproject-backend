@@ -13,6 +13,7 @@ const { Transaction } = require('../models');
 const { COUNTRIES } = require('../models/constants');
 const cashwyre = require('../providers/cashwyre');
 const kuda = require('../providers/kuda');
+const monime = require('../providers/monime');
 const { AppError, badRequest, conflict, unavailable } = require('../utils/errors');
 const { makeReference } = require('../utils/helpers');
 const { currencyOf, formatMoney } = require('../utils/money');
@@ -70,6 +71,12 @@ async function bankList(country, type, { fresh = false } = {}) {
     bankCache.set(key, { at: Date.now(), list: banks });
     return banks;
   }
+  if (viaMonime(country)) {
+    const raw = type === 'mobile_money' ? (await monime.momos()).filter((m) => m.canReceive !== false) : await monime.banks();
+    const list = raw.map((b) => ({ code: b.id, name: b.name, nameEnquiryRequired: false, provider: 'monime' }));
+    bankCache.set(key, { at: Date.now(), list });
+    return list;
+  }
   if (country === 'NG' && type === 'mobile_money' && kuda.configured() && !cashwyre.configured()) return [];
   let list = [];
   let lastError = null;
@@ -118,7 +125,9 @@ async function baseCountries({ fresh = false } = {}) {
     if (e instanceof AppError && e.code === 'PROVIDER_NOT_CONFIGURED' && !kuda.configured()) throw e;
   }
   // Only Kuda connected: Nigeria (banks) only.
-  const list = [...byCode.values()].filter((c) => c.currency && (cashwyre.configured() || c.code === 'NG'));
+  const list = [...byCode.values()].filter(
+    (c) => c.currency && (cashwyre.configured() || c.code === 'NG' || (c.code === 'SL' && monime.configured())),
+  );
 
   const out = [];
   for (let i = 0; i < list.length; i += 6) {
@@ -155,6 +164,7 @@ async function payoutCountries(opts) {
   );
   return list.map((c) => {
     if (viaKuda(c.code)) return { ...c, wallet: 'KUDA', available: true, provider: 'kuda' };
+    if (viaMonime(c.code)) return { ...c, wallet: 'MONIME', available: true, provider: 'monime' };
     const b = balances[c.currency];
     return { ...c, wallet: debitWalletFor(c.currency), available: b === null || b === undefined ? null : b > 0 };
   });
@@ -224,6 +234,9 @@ function debitWalletFor(destCurrency) {
  */
 const viaKuda = (country, accountType = 'bank') => country === 'NG' && accountType === 'bank' && kuda.configured();
 
+/** Sierra Leone mobile money and banks go through Monime once MONIME_* is set. */
+const viaMonime = (country) => country === 'SL' && monime.configured();
+
 /** Kuda's NIP fee for a transfer of [naira] (Kuda Business API pricing). */
 function kudaFee(naira) {
   if (naira <= 10_000) return 15;
@@ -280,7 +293,7 @@ async function checks(user, charge) {
   const service = serviceFor(user);
   assertServiceOpen(service, settings);
   assertCanTransact(user, settings);
-  if (!cashwyre.configured() && !kuda.configured()) {
+  if (!cashwyre.configured() && !kuda.configured() && !monime.configured()) {
     throw unavailable('Transfers are not connected yet. Please try again later.', 'PROVIDER_NOT_CONFIGURED');
   }
   if (charge !== undefined) await assertWithinLimits(user, service, charge, settings);
@@ -306,7 +319,24 @@ async function price(user, dest, { amount, accountNumber = '', accountType = 'ba
   let walletCurrency;
   let totalLocal;
 
-  if (viaKuda(dest.code, accountType)) {
+  if (viaMonime(dest.code)) {
+    // Paid in Leones from Dalabapay's Monime account: amount + the flat
+    // Monime transfer fee set in Admin → Settings.
+    const feeLe = ((settings.monime && settings.monime.payoutFee) || 0) / 100;
+    totalLocal = amount + feeLe;
+    fee = { feeLocal: feeLe, totalDebitLocal: totalLocal, totalDebitUsd: 0, feeUsd: 0, fxRate: null, fxRateInfo: null, provider: 'monime' };
+    debitWallet = '';
+    walletCurrency = 'MONIME';
+    if (userCur === dest.currency) {
+      cost = totalLocal;
+      cashwyreFeeSender = feeLe;
+    } else {
+      const [mine, le] = await Promise.all([usdRate(userCur, 'sell'), usdRate('SLE', 'buy')]);
+      perUsd = mine;
+      cost = totalLocal * (mine / le);
+      cashwyreFeeSender = feeLe * (mine / le);
+    }
+  } else if (viaKuda(dest.code, accountType)) {
     // Paid in Naira from the Kuda account: amount + Kuda's transfer fee,
     // converted at the Leones/Naira rate (via the dollar rates).
     const feeNaira = kudaFee(amount);
@@ -343,7 +373,7 @@ async function price(user, dest, { amount, accountNumber = '', accountType = 'ba
   // wallet's currency. Converted totals are estimates, so only a wallet
   // clearly too low (under 90% of it) stops the transfer.
   let needed = 0;
-  if (walletCurrency === 'KUDA') needed = 0; // Kuda says no if the account is short; the customer is refunded
+  if (walletCurrency === 'KUDA' || walletCurrency === 'MONIME') needed = 0; // the provider says no if short; the customer is refunded
   else if (walletCurrency === dest.currency) needed = totalLocal;
   else if (walletCurrency === userCur) needed = cost * 0.9;
   const withFx = userCur === dest.currency ? cost : cost * (1 + (pricing.fxMarginPercent || 0) / 100);
@@ -361,8 +391,8 @@ async function price(user, dest, { amount, accountNumber = '', accountType = 'ba
       feeCurrency: dest.currency,
       feeInYourCurrency: cashwyreFee / 100,
       feeUsd: fee.feeUsd || null,
-      totalDebit: walletCurrency === dest.currency || walletCurrency === 'KUDA' ? totalLocal : Math.round(cost * 100) / 100,
-      wallet: walletCurrency === 'KUDA' ? 'NGN' : walletCurrency,
+      totalDebit: walletCurrency === dest.currency || walletCurrency === 'KUDA' || walletCurrency === 'MONIME' ? totalLocal : Math.round(cost * 100) / 100,
+      wallet: walletCurrency === 'KUDA' ? 'NGN' : walletCurrency === 'MONIME' ? 'SLE' : walletCurrency,
       provider: fee.provider || 'cashwyre',
       rate: fee.fxRate || null, // units of the recipient's currency per $1
       rateInfo: fee.fxRateInfo,
@@ -426,6 +456,7 @@ async function solveForSend(user, dest, sendAmount, settings, accountType = 'ban
 
 /** The account holder's name from the bank / mobile money provider. */
 async function lookupName({ country, bankCode, accountNumber }) {
+  if (viaMonime(country)) return { accountName: null, verified: false };
   if (viaKuda(country, 'bank')) {
     try {
       const r = await kuda.nameEnquiry({ bankCode, accountNumber });
@@ -491,7 +522,7 @@ async function quote(user, { country, accountType, bankCode, accountNumber, acco
     chargeCurrency: userCur,
     rate: p.breakdown.rate,
     serviceFee: Math.round(((p.breakdown.cashwyre.feeInYourCurrency || 0) + (p.breakdown.dalabapayFee || 0)) * 100) / 100,
-    provider: viaKuda(dest.code, accountType) ? 'kuda' : 'cashwyre',
+    provider: viaMonime(dest.code) ? 'monime' : viaKuda(dest.code, accountType) ? 'kuda' : 'cashwyre',
     sessionId: looked.sessionId || null,
   };
   const token = jwt.sign({ sub: String(user._id), q }, env.jwtSecret, { expiresIn: QUOTE_TTL, audience: 'payout-quote' });
@@ -600,6 +631,10 @@ async function send(user, { quoteToken, pin }) {
     await sendWithKuda(txn, q, { user, description });
     return Transaction.findById(txn._id);
   }
+  if (q.provider === 'monime') {
+    await sendWithMonime(txn, q, { user, description });
+    return Transaction.findById(txn._id);
+  }
   try {
     const r = await cashwyre.initiatePayout({
       reference,
@@ -694,6 +729,62 @@ async function sendWithKuda(txn, q, { user, description }) {
   });
 }
 
+/** Sierra Leone mobile money / bank transfer from the Monime account. */
+async function sendWithMonime(txn, q, { user, description }) {
+  try {
+    const r = await monime.createPayout({
+      reference: txn.reference,
+      amountCents: Math.round(q.amount * 100),
+      type: q.accountType === 'bank' ? 'bank' : 'momo',
+      providerId: q.bankCode,
+      accountNumber: q.accountNumber,
+      metadata: { userId: String(user._id) },
+    });
+    if (r.id) {
+      txn.providerReference = String(r.id);
+      await txn.save();
+    }
+    const state = monime.payoutState(r.status);
+    if (state !== 'pending') await settle(txn, state, r.raw?.failureDetail?.message || null);
+  } catch (e) {
+    if (e instanceof AppError) {
+      txn.metadata = { ...txn.metadata, failureReason: e.message };
+      await txn.save();
+      await refundTransaction(txn, { reason: e.message, status: 'failed' });
+      throw badRequest(`The transfer was declined: ${e.message}. Your wallet has been refunded.`, 'TRANSFER_DECLINED');
+    }
+    // No answer: it may have gone through (idempotency key = our reference).
+    await raiseAlert({
+      type: 'provider',
+      severity: 'warning',
+      title: 'Monime did not respond',
+      body: `${txn.reference} (${description}, ${formatMoney(q.charge, txn.currency)}) is pending: ${e.message}. It will be checked with Monime.`,
+      user: user._id,
+      transaction: txn._id,
+    });
+  }
+  await notify(user._id, {
+    title: 'Transfer on its way',
+    body: `Le ${q.amount.toFixed(2)} to ${q.accountName} (${q.bankName}) is being processed.`,
+    kind: 'payment',
+    data: { transactionId: String(txn._id) },
+  });
+}
+
+/** Monime payout webhook: read the payout back from Monime and settle. */
+async function onMonimePayout(payoutId, data = {}) {
+  const ref = data.metadata && data.metadata.reference;
+  const txn = await Transaction.findOne({
+    type: 'payout',
+    provider: 'monime',
+    $or: [{ providerReference: payoutId }, ...(ref ? [{ reference: ref }] : [])],
+  });
+  if (!txn) return { matched: false };
+  if (txn.status !== 'pending') return { reference: txn.reference, result: txn.status };
+  const r = await checkPayout(txn);
+  return { reference: txn.reference, ...r };
+}
+
 // ── Settling ───────────────────────────────────────────────
 
 /** Moves a pending payout to success, or failed with a refund. */
@@ -731,9 +822,16 @@ async function settle(txn, state, message, { actor = null } = {}) {
 /** Asks Cashwyre about a pending payout and settles it. */
 async function checkPayout(txn, { actor = null } = {}) {
   if (txn.status !== 'pending' || txn.type !== 'payout') return { result: txn.status, message: 'Not a pending transfer.' };
-  const r = txn.provider === 'kuda'
-    ? await kuda.transferStatus({ requestRef: txn.reference, thirdParty: !kuda.isKudaBank((txn.metadata || {}).bankName) })
-    : await cashwyre.payoutStatus({ reference: txn.reference, transactionReference: txn.providerReference });
+  let r;
+  if (txn.provider === 'monime') {
+    if (!txn.providerReference) return { result: 'pending', message: 'Not sent to Monime yet.' };
+    const p = await monime.getPayout(txn.providerReference);
+    r = { status: monime.payoutState(p.status), message: (p.failureDetail && p.failureDetail.message) || null };
+  } else if (txn.provider === 'kuda') {
+    r = await kuda.transferStatus({ requestRef: txn.reference, thirdParty: !kuda.isKudaBank((txn.metadata || {}).bankName) });
+  } else {
+    r = await cashwyre.payoutStatus({ reference: txn.reference, transactionReference: txn.providerReference });
+  }
   await settle(txn, r.status, r.message, { actor });
   return { result: r.status, message: r.message };
 }
@@ -792,6 +890,7 @@ async function onPayoutEvent(eventData, eventType = '') {
 }
 
 module.exports = {
+  onMonimePayout,
   ACCOUNT_TYPES,
   payoutCountries,
   coverage,

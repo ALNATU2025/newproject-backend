@@ -108,6 +108,14 @@ const DEFAULTS = {
 
   // How Sierra Leone users add money: they pay one of these accounts, then
   // tap "I've paid" and an admin credits the wallet. Edit in Admin → Settings.
+  // Monime (Sierra Leone mobile money): fee % on instant Orange Money /
+  // Afrimoney top-ups, and a flat fee (Leones, cents) on transfers to
+  // Sierra Leone mobile money / banks. Editable in Admin → Settings.
+  monime: {
+    depositFeePercent: 0,
+    payoutFee: 0,
+  },
+
   slFunding: {
     minAmount: 10 * LEONE,
     maxAmount: 100_000 * LEONE,

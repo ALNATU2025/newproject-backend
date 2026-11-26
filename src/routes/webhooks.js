@@ -70,6 +70,24 @@ router.post(
 // ── Kuda (Add Money account numbers) ───────────────────────
 // Give Kuda this URL for payment notifications:
 //   https://<your server>/api/webhooks/kuda/<KUDA_WEBHOOK_TOKEN>
+// Monime (Sierra Leone mobile money). URL in Monime's dashboard:
+//   https://<your server>/api/webhooks/monime   (HMAC secret = MONIME_WEBHOOK_SECRET)
+router.post(
+  '/monime',
+  asyncHandler(async (req, res) => {
+    // eslint-disable-next-line global-require
+    const monime = require('../providers/monime');
+    if (!env.monime.webhookSecret) return res.status(503).json({ success: false, message: 'Monime webhook not set up' });
+    if (!monime.verifySignature(req.get('monime-signature'), req.rawBody)) {
+      return res.status(401).json({ success: false, message: 'Bad signature' });
+    }
+    if (!env.isTest) console.log(`[monime webhook] ${req.body?.event?.name} ${req.body?.object?.id || ''}`);
+    // eslint-disable-next-line global-require
+    const out = await require('../services/monimeFunding').onEvent(req.body);
+    return ok(res, out);
+  }),
+);
+
 router.post(
   '/kuda/:token',
   asyncHandler(async (req, res) => {

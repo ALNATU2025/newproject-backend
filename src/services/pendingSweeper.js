@@ -95,6 +95,8 @@ function startPendingSweeper() {
     running = true;
     try {
       await sweepOnce();
+      // eslint-disable-next-line global-require
+      await require('./monimeFunding').sweep().catch((e) => console.warn('[monime sweep]', e.message));
       await checkProviderBalance().catch((e) => console.warn('[balance watch]', e.message));
     } catch (e) {
       console.error('Pending sweeper:', e.message);

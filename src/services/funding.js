@@ -21,6 +21,7 @@ async function creditDeposit({
   providerReference = null,
   pendingTxn = null,
   chargeFee = true,
+  feePercent = null, // overrides Admin → Settings funding fee %
   actor = null,
   note = null,
   description,
@@ -30,7 +31,7 @@ async function creditDeposit({
     if (existing) return { transaction: existing, duplicate: true };
   }
   const settings = await getSettings();
-  const fee = chargeFee ? percentOf(amount, settings.fundingFeePercent) : 0;
+  const fee = chargeFee ? percentOf(amount, feePercent === null ? settings.fundingFeePercent : feePercent) : 0;
   const net = amount - fee;
   // Sierra Leone wallets have a maximum balance per account level.
   // eslint-disable-next-line global-require
