@@ -93,7 +93,8 @@ describe('Add Money with Orange Money / Afrimoney', () => {
     expect(r.body.data.ussdCode).toMatch(/^\*715\*/);
     expect(r.body.data.transaction.status).toBe('pending');
     const create = calls.find((c) => c.path === '/v1/payment-codes');
-    expect(create.body).toEqual(expect.objectContaining({ mode: 'one_time', amount: { currency: 'SLE', value: 25000 }, authorizedProviders: ['m17'], authorizedPhoneNumber: '+23276123456' }));
+    expect(create.body).toEqual(expect.objectContaining({ mode: 'one_time', amount: { currency: 'SLE', value: 25000 }, authorizedPhoneNumber: '+23276123456' }));
+    expect(create.body.authorizedProviders).toBeUndefined();
     expect(create.headers.Authorization).toBe('Bearer mon_live_token');
     expect(create.headers['Monime-Space-Id']).toBe('spc-test');
     expect(create.headers['Idempotency-Key']).toMatch(/^pc-MN/);
