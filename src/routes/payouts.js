@@ -43,7 +43,7 @@ router.get(
   '/countries',
   asyncHandler(async (req, res) => {
     // eslint-disable-next-line global-require
-    const connected = cashwyre.configured() || kuda.configured() || require('../providers/monime').configured();
+    const connected = (cashwyre.configured() && env.cashwyre.payouts !== false) || kuda.configured() || require('../providers/monime').configured();
     ok(res, { connected, countries: connected ? await payouts.payoutCountries() : [] });
   }),
 );

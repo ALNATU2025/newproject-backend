@@ -86,6 +86,7 @@ function createApp() {
       cashwyre: {
         keys: env.cashwyre.secretKey && env.cashwyre.businessCode ? 'set' : 'MISSING',
         webhook: env.cashwyre.webhookToken ? 'set' : 'MISSING — set CASHWYRE_WEBHOOK_TOKEN',
+        transfers: env.cashwyre.payouts ? 'on' : 'off (CASHWYRE_PAYOUTS)',
       },
       kuda: {
         mode: env.kuda.env,

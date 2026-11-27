@@ -239,3 +239,27 @@ test('without MONIME_MODE=live it stays in test mode, whatever the token looks l
     env.monime.mode = 'live';
   }
 });
+
+test('with Cashwyre transfers off: Send shows Sierra Leone (Monime) only; other countries refused', async () => {
+  const savedKeys = { ...env.cashwyre };
+  Object.assign(env.cashwyre, { secretKey: 'cw-secret', businessCode: 'cw-biz', payouts: false });
+  clearPayoutCache();
+  try {
+    const u = await readyUser({ country: 'SL' });
+    await User.updateOne({ _id: u.user.id }, { $set: { balance: 100000 } });
+    const c = (await api().get('/api/payouts/countries').set(auth(u.token))).body.data;
+    expect(c.connected).toBe(true);
+    expect(c.countries.map((x) => x.code)).toEqual(['SL']);
+    expect(c.countries[0]).toEqual(expect.objectContaining({ bank: true, mobileMoney: true, provider: 'monime' }));
+    const banks = (await api().get('/api/payouts/banks').query({ country: 'SL', type: 'bank' }).set(auth(u.token))).body.data;
+    expect(banks.map((b) => b.name)).toEqual(['Rokel Commercial Bank']);
+    expect((await api().get('/api/payouts/banks').query({ country: 'GH', type: 'bank' }).set(auth(u.token))).body.data).toEqual([]);
+    const gh = await api().post('/api/payouts/quote').set(auth(u.token)).send({
+      country: 'GH', accountType: 'mobile_money', bankCode: 'MTN', accountNumber: '0241234567', accountName: 'Kofi', amount: 50,
+    });
+    expect(gh.status).toBeGreaterThanOrEqual(400);
+  } finally {
+    Object.assign(env.cashwyre, savedKeys);
+    clearPayoutCache();
+  }
+});

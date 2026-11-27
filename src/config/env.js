@@ -211,6 +211,11 @@ const env = {
         .map(([k, v]) => [k.toUpperCase(), Number(v)]),
     ),
     timeoutMs: Number(process.env.CASHWYRE_TIMEOUT_MS || 45000),
+    // Transfers (Send) through Cashwyre. Off for now: Sierra Leone mobile
+    // money and banks go through Monime, Nigerian banks through Kuda.
+    // CASHWYRE_PAYOUTS=on turns Cashwyre transfers back on. FX rates and
+    // dollar cards are not affected.
+    payouts: /^(on|true|1|yes)$/i.test(clean(process.env.CASHWYRE_PAYOUTS) || (process.env.NODE_ENV === 'test' ? 'on' : 'off')),
   },
 };
 

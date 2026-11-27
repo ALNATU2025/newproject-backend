@@ -12,6 +12,9 @@ const env = require('../config/env');
 const { Transaction } = require('../models');
 const { COUNTRIES } = require('../models/constants');
 const cashwyre = require('../providers/cashwyre');
+
+/** Cashwyre for transfers: only when connected and CASHWYRE_PAYOUTS is on. */
+const cwPayouts = () => cashwyre.configured() && env.cashwyre.payouts !== false;
 const kuda = require('../providers/kuda');
 const monime = require('../providers/monime');
 const { AppError, badRequest, conflict, unavailable } = require('../utils/errors');
@@ -77,7 +80,7 @@ async function bankList(country, type, { fresh = false } = {}) {
     bankCache.set(key, { at: Date.now(), list });
     return list;
   }
-  if (country === 'NG' && type === 'mobile_money' && kuda.configured() && !cashwyre.configured()) return [];
+  if (!cwPayouts()) return [];
   let list = [];
   let lastError = null;
   for (const [accountType, transactionType] of LIST_VARIANTS[type] || []) {
@@ -115,7 +118,7 @@ async function baseCountries({ fresh = false } = {}) {
   // used to remove countries; the bank / mobile money lists decide.)
   const byCode = new Map(Object.entries(KNOWN).map(([code, [name, currency]]) => [code, { code, name, currency }]));
   try {
-    for (const c of await cashwyre.countries()) {
+    for (const c of cwPayouts() ? await cashwyre.countries() : []) {
       if (!c.code || c.code === 'US') continue;
       const known = byCode.get(c.code);
       if (known) known.name = c.name || known.name;
@@ -126,7 +129,7 @@ async function baseCountries({ fresh = false } = {}) {
   }
   // Only Kuda connected: Nigeria (banks) only.
   const list = [...byCode.values()].filter(
-    (c) => c.currency && (cashwyre.configured() || c.code === 'NG' || (c.code === 'SL' && monime.configured())),
+    (c) => c.currency && (cwPayouts() || c.code === 'NG' || (c.code === 'SL' && monime.configured())),
   );
 
   const out = [];
@@ -158,7 +161,7 @@ async function baseCountries({ fresh = false } = {}) {
  */
 async function payoutCountries(opts) {
   const list = await baseCountries(opts);
-  const currencies = cashwyre.configured() ? [...new Set(list.map((c) => c.currency))] : [];
+  const currencies = cwPayouts() ? [...new Set(list.map((c) => c.currency))] : [];
   const balances = Object.fromEntries(
     await Promise.all(currencies.map(async (cur) => [cur, await businessBalance(debitWalletFor(cur))])),
   );
@@ -294,7 +297,7 @@ async function checks(user, charge) {
   const service = serviceFor(user);
   assertServiceOpen(service, settings);
   assertCanTransact(user, settings);
-  if (!cashwyre.configured() && !kuda.configured() && !monime.configured()) {
+  if (!cwPayouts() && !kuda.configured() && !monime.configured()) {
     throw unavailable('Transfers are not connected yet. Please try again later.', 'PROVIDER_NOT_CONFIGURED');
   }
   if (charge !== undefined) await assertWithinLimits(user, service, charge, settings);
@@ -319,6 +322,13 @@ async function price(user, dest, { amount, accountNumber = '', accountType = 'ba
   let debitWallet;
   let walletCurrency;
   let totalLocal;
+
+  if (!viaMonime(dest.code) && !viaKuda(dest.code, accountType) && !cwPayouts()) {
+    throw unavailable(
+      dest.code === 'SL' ? 'Mobile money transfers are not switched on yet. Please try again later.' : `Transfers to ${dest.name || dest.code} are not available right now.`,
+      'PROVIDER_NOT_CONFIGURED',
+    );
+  }
 
   if (viaMonime(dest.code)) {
     // Paid in Leones from Dalabapay's Monime account: amount + the flat
@@ -466,6 +476,7 @@ async function lookupName({ country, bankCode, accountNumber }) {
       return { accountName: null, verified: false, message: e instanceof AppError && e.code === 'PROVIDER_DECLINED' ? e.message : null };
     }
   }
+  if (!cwPayouts()) return { accountName: null, verified: false };
   try {
     const name = await cashwyre.accountLookup({ country, bankCode, accountNumber });
     return name ? { accountName: String(name).trim(), verified: true } : { accountName: null, verified: false };
