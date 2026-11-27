@@ -79,6 +79,11 @@ async function request(method, path, { body, idempotencyKey } = {}) {
       err.noAnswer = true;
       throw err;
     }
+    if (res.status === 401 || res.status === 403) {
+      // Our token is wrong or missing a role: not the customer's problem.
+      if (!env.isTest) console.warn('[monime] access token rejected or missing a permission — check its roles in Monime');
+      throw unavailable('Mobile money is not available right now. Please try again later.', 'PROVIDER_AUTH');
+    }
     throw new AppError(400, typeof msg === 'string' ? msg : 'Declined by Monime', 'PROVIDER_DECLINED');
   }
   return json.result !== undefined ? json.result : json;

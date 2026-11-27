@@ -263,3 +263,16 @@ test('with Cashwyre transfers off: Send shows Sierra Leone (Monime) only; other 
     clearPayoutCache();
   }
 });
+
+test('token missing a permission: customer gets a friendly message', async () => {
+  monime.setFetch(async () => ({ ok: false, status: 403, text: async () => JSON.stringify({ success: false, error: { message: 'Requires the permissions [paymentcode.paymentcodes:create]' } }) }));
+  try {
+    const u = await readyUser({ country: 'SL' });
+    await User.updateOne({ _id: u.user.id }, { $set: { role: 'admin' } });
+    const r = await api().post('/api/wallet/fund/monime').set(auth(u.token)).send({ amount: 10, providerId: 'm17', phone: '076123456' });
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(r.body)).not.toMatch(/permissions/);
+  } finally {
+    monime.setFetch(fakeMonime);
+  }
+});
