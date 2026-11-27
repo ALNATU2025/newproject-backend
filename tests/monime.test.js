@@ -33,6 +33,9 @@ async function fakeMonime(url, opts) {
   }
   if (opts.method === 'GET' && u.pathname === '/v1/banks') return ok([{ providerId: 'slb001', name: 'Rokel Commercial Bank', status: { active: true } }]);
   if (opts.method === 'POST' && u.pathname === '/v1/payment-codes') {
+    if (body.authorizedPhoneNumber && body.authorizedProviders) {
+      return reply(400, { success: false, error: { message: 'A payment provider must not be set when a paying phone number is specified.' } });
+    }
     n += 1;
     const id = `pmc-${n}`;
     codes[id] = { id, status: 'pending', amount: body.amount, ussdCode: `*715*1*0*${100000 + n}#`, reference: body.reference, metadata: body.metadata, expireTime: '2026-11-26T22:45:00Z' };

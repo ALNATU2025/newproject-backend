@@ -135,9 +135,11 @@ async function createPaymentCode({ reference, amountCents, phone, providerId, na
     metadata: { reference, ...metadata },
   };
   if (customerName) body.customer = { name: String(customerName).slice(0, 100) };
-  if (providerId) body.authorizedProviders = [providerId];
+  // Monime takes one or the other: a paying number (which already decides
+  // the network) or, with no number, the allowed networks.
   const p = msisdn(phone);
   if (p) body.authorizedPhoneNumber = p;
+  else if (providerId) body.authorizedProviders = [providerId];
   const r = await request('POST', '/v1/payment-codes', { body, idempotencyKey: `pc-${reference}` });
   return { id: r.id, ussdCode: r.ussdCode, status: r.status, expireTime: r.expireTime || null, raw: r };
 }
