@@ -376,6 +376,20 @@ describe('payments', () => {
     expect(pay.body.amount).toBeUndefined();
   });
 
+  test('renewing for 2 months buys the current package × 2 (never a 2-month renew)', async () => {
+    const u = await readyUser({ fund: 20000 });
+    const r = await api().post('/api/services/cable').set(tv(u)).send({
+      provider: 'gotv', smartcardNumber: '1212121212', action: 'renew', months: 2, phone: '08031234567', pin: u.pin,
+    });
+    expect(r.status).toBe(201);
+    const t = r.body.data.transaction;
+    expect(t.status).toBe('success');
+    expect(t.amount).toBe(7200);
+    const pay = fake.calls.find((c) => c.path === 'pay');
+    expect(pay.body).toEqual(expect.objectContaining({ serviceID: 'gotv', subscription_type: 'change', variation_code: 'gotv-max', quantity: 2 }));
+    expect(pay.body.amount).toBeUndefined();
+  });
+
   test('StarTimes recharge sends only the variation code; renew and 2 months are refused', async () => {
     const u = await readyUser({ fund: 20000 });
     const ok = await api().post('/api/services/cable').set(tv(u)).send({

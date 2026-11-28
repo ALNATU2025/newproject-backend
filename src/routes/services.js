@@ -371,12 +371,39 @@ router.post(
         name: customer.currentPlan || 'Current package',
         amount: customer.renewalAmount,
       };
+      // A renewal at the provider is always one period. Several months of
+      // the same package are bought as that package × months instead
+      // (otherwise the customer pays for every month but gets one).
+      if (months > 1) {
+        const plans = await cablePlansFor(provider);
+        const same = chosen.code && chosen.code !== 'renew' ? plans.find((x) => x.code === chosen.code && !x.manual) : null;
+        if (!same) {
+          throw badRequest(
+            'Renewal is for one month at a time. To pay for more months, choose your package under "Change package" and pick the months.',
+            'RENEW_ONE_MONTH',
+          );
+        }
+        const txn = await executePurchase({
+          user: req.user,
+          service: 'cable',
+          pin,
+          amount: same.amount * months,
+          recipient: smartcardNumber,
+          description: `${prov.name} ${same.name} × ${months} months`,
+          providerParams: { provider, action: 'change', planCode: same.code, months, phone },
+          metadata: { provider: prov.name, plan: same.name, months, phone, customerName: customer.customerName, renewedAsPackage: true },
+        });
+        return respond(res, txn);
+      }
     } else {
       if (!req.body.planCode) throw badRequest('Choose a package.', 'PLAN_REQUIRED');
       chosen = await findPlan(await cablePlansFor(provider), req.body.planCode, 'package');
     }
     // Our ExtraView packages: pay the exact amount as a renewal.
     if (chosen.manual) {
+      if (months > 1) {
+        throw badRequest(`${chosen.name} is paid one month at a time.`, 'RENEW_ONE_MONTH');
+      }
       const txn = await executePurchase({
         user: req.user,
         service: 'cable',

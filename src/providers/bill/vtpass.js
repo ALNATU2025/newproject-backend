@@ -232,8 +232,8 @@ function createVtpass({
       if (s === 'delivered' || s === 'successful') {
         if (expectedKobo && raw.amount !== null && Math.abs(kobo(raw.amount) - expectedKobo) > N) {
           await alert(
-            'warning',
-            'VTpass amount differs',
+            kobo(raw.amount) < expectedKobo ? 'critical' : 'warning',
+            kobo(raw.amount) < expectedKobo ? 'VTpass delivered less than we charged — refund the difference' : 'VTpass amount differs',
             `${requestId}: we charged ₦${naira(expectedKobo)} but VTpass recorded ₦${raw.amount}.`,
           );
         }
@@ -436,6 +436,10 @@ function createVtpass({
       billersCode: String(recipient),
       phone: String(phone || ''),
     };
+    if (action === 'renew' && Number(months) > 1) {
+      // Never send a multi-month renewal: VTpass delivers one period.
+      throw badRequest('Renewal is for one month at a time. Choose your package to pay for more months.', 'RENEW_ONE_MONTH');
+    }
     if (action === 'renew') {
       if (!tv.renew) throw badRequest(`${tv.name} can't be renewed this way. Choose a package instead.`, 'RENEW_NOT_SUPPORTED');
       body.subscription_type = 'renew';
